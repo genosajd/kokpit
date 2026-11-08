@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Kokpit F11</string>
+    <string name="nav_listener">Kokpit F11 – podgląd trasy</string>
+    <string name="split_service">Kokpit F11 – podzielony ekran</string>
+    <string name="split_service_desc">Pozwala przyciskowi Mapy + YouTube włączyć podzielony ekran. Nie czyta zawartości ekranu.</string>
+</resources>

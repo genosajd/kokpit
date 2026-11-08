@@ -1,0 +1,9 @@
+# tylko kod launchera, skrypty i README trafiają do repo
+*.apk
+CLAUDE.md
+radio_info.txt
+Zdjęcia/
+prototyp/
+model3d/*
+!model3d/przygotuj.py
+.claude/

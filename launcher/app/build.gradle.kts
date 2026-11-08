@@ -1,0 +1,62 @@
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
+}
+
+android {
+    namespace = "pl.lawinski.radiolauncher"
+    compileSdk = 35
+
+    defaultConfig {
+        applicationId = "pl.lawinski.radiolauncher"
+        minSdk = 26
+        targetSdk = 35
+        versionCode = 8
+        versionName = "0.3.4"
+        // radio: arm64 (Snapdragon 668S); x86_64 tylko dla emulatora
+        // -PdoAuta: tylko arm64, mniejszy plik do instalacji w radiu
+        ndk { abiFilters += if (project.hasProperty("doAuta")) listOf("arm64-v8a") else listOf("arm64-v8a", "x86_64") }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            // bez własnego klucza: podpis debug wystarcza do instalacji z pendrive'a
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = "17" }
+    buildFeatures { compose = true }
+}
+
+dependencies {
+    val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
+    implementation(composeBom)
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.activity:activity-compose:1.9.3")
+    implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+
+    // podgląd kamery na żywo z serwera RTSP aplikacji Xiaomi Cam (127.0.0.1:18554)
+    val media3 = "1.5.1"
+    implementation("androidx.media3:media3-exoplayer:$media3")
+    implementation("androidx.media3:media3-exoplayer-rtsp:$media3")
+    implementation("androidx.media3:media3-ui:$media3")
+
+    // model 3D auta (.glb) obracany palcem
+    val filament = "1.56.0"
+    implementation("com.google.android.filament:filament-android:$filament")
+    implementation("com.google.android.filament:gltfio-android:$filament")
+    implementation("com.google.android.filament:filament-utils-android:$filament")
+}
