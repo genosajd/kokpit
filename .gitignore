@@ -7,3 +7,5 @@ prototyp/
 model3d/*
 !model3d/przygotuj.py
 .claude/
+# model mowy Vosk (53 MB) – pobiera pobierz_model_mowy.sh
+launcher/app/src/main/assets/vosk-pl.zip

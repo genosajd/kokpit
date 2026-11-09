@@ -4,6 +4,11 @@
 
     <uses-permission android:name="android.permission.READ_LOGS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- hasło „OK BMW”: nasłuch w tle i otwarcie okienka asystenta nad innymi aplikacjami -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
@@ -47,13 +52,42 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- asystent głosowy: przycisk głosowy (np. na kierownicy, jeśli radio go tak przekazuje) albo słuchawki BT -->
+        </activity>
+        <service
+            android:name=".HotwordService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+        <!-- okienko asystenta głosowego nad dowolną aplikacją (Kokpit jako domyślny asystent, przycisk głosowy) -->
+        <activity
+            android:name=".VoiceActivity"
+            android:exported="true"
+            android:theme="@style/Theme.RadioLauncher.Voice"
+            android:taskAffinity="pl.lawinski.radiolauncher.voice"
+            android:launchMode="singleTask"
+            android:excludeFromRecents="true"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|navigation|uiMode|density">
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VOICE_COMMAND" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
             <intent-filter>
-                <action android:name="android.intent.action.ASSIST" />
+                <action android:name="android.intent.action.VOICE_ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <!-- klawisz asystenta (KEYCODE_VOICE_ASSIST, np. z kierownicy) Android 13 zamienia na WEB_SEARCH,
+                 a przy zablokowanym ekranie na VOICE_SEARCH_HANDS_FREE – bez tego trafiał do Google,
+                 który otwierał ustawienia asystenta -->
+            <intent-filter android:priority="100">
+                <action android:name="android.speech.action.WEB_SEARCH" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter android:priority="100">
+                <action android:name="android.speech.action.VOICE_SEARCH_HANDS_FREE" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>

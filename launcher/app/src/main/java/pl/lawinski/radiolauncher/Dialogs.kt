@@ -25,6 +25,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.foundation.border
@@ -206,6 +207,7 @@ fun SettingsDialog(
     fun label(key: String) = Apps.find(apps, key)?.label ?: "nie wybrano"
     var aiProvider by remember { mutableStateOf(Prefs.aiProvider) }
     var aiSpeak by remember { mutableStateOf(Prefs.aiSpeak) }
+    var hotword by remember { mutableStateOf(Prefs.hotword) }
     val ttsEngine = Prefs.ttsEngine
     var group by remember { mutableStateOf(Prefs.settingsGroup.coerceIn(0, SETTINGS_GROUPS.size - 1)) }
 
@@ -227,7 +229,7 @@ fun SettingsDialog(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("Kokpit F11 0.3.9", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
+                Text("Kokpit F11 0.3.10", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
             }
             Spacer(Modifier.width(d(26)))
             LazyVerticalGrid(
@@ -377,6 +379,33 @@ fun SettingsDialog(
                 item {
                     SettingTile(Icons.Outlined.RecordVoiceOver, "Czytaj odpowiedzi na głos", if (aiSpeak) "Odpowiedzi czytane po polsku" else "Odpowiedzi tylko na ekranie", on = aiSpeak) {
                         aiSpeak = !aiSpeak; Prefs.aiSpeak = aiSpeak
+                    }
+                }
+                item {
+                    val overlay = android.provider.Settings.canDrawOverlays(act)
+                    SettingTile(Icons.Outlined.Mic, "Hasło „OK BMW”",
+                        when {
+                            !hotword -> "Wyłączone – nie zużywa mikrofonu ani procesora"
+                            !overlay -> "Włączone, ale brak zgody „Wyświetlanie nad innymi” – dotknij"
+                            else -> "Słucha stale (w radiu, bez internetu); trochę obciąża procesor"
+                        }, on = hotword) {
+                        if (hotword && !overlay) {
+                            runCatching { act.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:" + act.packageName))) }
+                            return@SettingTile
+                        }
+                        if (hotword) {
+                            hotword = false; Prefs.hotword = false; Hotword.sync(act)
+                        } else if (!Hotword.hasModel(act)) {
+                            android.widget.Toast.makeText(act, "Ta wersja Kokpitu nie ma modelu mowy", android.widget.Toast.LENGTH_LONG).show()
+                        } else act.requestMic { ok ->
+                            if (ok) {
+                                hotword = true; Prefs.hotword = true; Hotword.sync(act)
+                                if (!android.provider.Settings.canDrawOverlays(act)) {
+                                    android.widget.Toast.makeText(act, "Zezwól Kokpitowi na wyświetlanie nad innymi aplikacjami – inaczej „OK BMW” zadziała tylko na ekranie Kokpitu", android.widget.Toast.LENGTH_LONG).show()
+                                    runCatching { act.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:" + act.packageName))) }
+                                }
+                            } else android.widget.Toast.makeText(act, "Bez mikrofonu hasło nie zadziała", android.widget.Toast.LENGTH_LONG).show()
+                        }
                     }
                 }
                 item {

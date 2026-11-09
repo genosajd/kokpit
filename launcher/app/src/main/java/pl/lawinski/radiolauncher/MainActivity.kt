@@ -92,6 +92,19 @@ class MainActivity : ComponentActivity() {
 
     fun stopSpeaking() = Speech.stop()
 
+    private var onMic: ((Boolean) -> Unit)? = null
+    private val micLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        onMic?.invoke(ok)
+        onMic = null
+    }
+
+    /** Zgoda na mikrofon (hasło „OK BMW”). */
+    fun requestMic(then: (Boolean) -> Unit) {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) return then(true)
+        onMic = then
+        micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         location.start()
     }
@@ -107,6 +120,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Prefs.init(this)
+        live = this
         widgetManager = AppWidgetManager.getInstance(this)
         widgetHost = AppWidgetHost(this, WIDGET_HOST_ID)
         location = LocationRepo(this)
@@ -148,6 +162,7 @@ class MainActivity : ComponentActivity() {
         }
         location.start()
         visible.value = true
+        Hotword.sync(this)
     }
 
     override fun onResume() {
@@ -166,6 +181,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        if (live === this) live = null
         unregisterReceiver(packagesChanged)
         Speech.shutdown()
         super.onDestroy()
@@ -180,18 +196,13 @@ class MainActivity : ComponentActivity() {
     /** Przycisk głosowy / ASSIST / VOICE_COMMAND: od razu słuchamy pytania do asystenta. */
     private fun handleVoiceIntent(intent: Intent?) {
         val a = intent?.action ?: return
-        if (a == Intent.ACTION_VOICE_COMMAND || a == Intent.ACTION_ASSIST) startVoiceAssistant()
+        if (a == Intent.ACTION_VOICE_COMMAND || a == Intent.ACTION_ASSIST || a == "android.intent.action.VOICE_ASSIST") startVoiceAssistant()
     }
 
+    /** Okienko asystenta (VoiceActivity) – słucha od razu. */
     fun startVoiceAssistant() {
         stopSpeaking()
-        if (!Assistant.hasKey()) {
-            android.widget.Toast.makeText(this, "Asystent: wpisz klucz API w Ustawieniach → Asystent AI", android.widget.Toast.LENGTH_LONG).show()
-            return
-        }
-        if (!listen { Assistant.send(this, it) }) {
-            android.widget.Toast.makeText(this, "Radio nie ma rozpoznawania mowy (Google)", android.widget.Toast.LENGTH_LONG).show()
-        }
+        VoiceActivity.start(this)
     }
 
     /** Klawisze asystenta/wyszukiwania (np. z kierownicy), gdy Kokpit jest na ekranie. */
@@ -344,6 +355,10 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val WIDGET_HOST_ID = 1027
+
+        /** działający ekran Kokpitu – okienko asystenta (VoiceActivity) wykonuje przez niego narzędzia */
+        @Volatile
+        var live: MainActivity? = null
         const val XIAOMI_CAM = "pl.lawinski.xiaomicam"
     }
 }

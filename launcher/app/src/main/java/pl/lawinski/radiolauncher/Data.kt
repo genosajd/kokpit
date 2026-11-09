@@ -154,6 +154,10 @@ object Prefs {
     var aiInstructions: String
         get() = sp.getString("ai_instructions", "") ?: ""
         set(v) = sp.edit().putString("ai_instructions", v).apply()
+    /** hasło „OK BMW” (Hotword.kt); domyślnie wyłączone – nie zużywa zasobów */
+    var hotword: Boolean
+        get() = sp.getBoolean("hotword", false)
+        set(v) = sp.edit().putBoolean("hotword", v).apply()
     var aiSpeak: Boolean
         get() = sp.getBoolean("ai_speak", true)
         set(v) = sp.edit().putBoolean("ai_speak", v).apply()

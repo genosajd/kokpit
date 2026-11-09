@@ -81,9 +81,12 @@ private object AssistantTools {
         ),
         Def(
             "media_control",
-            "Steruje odtwarzaczem, który gra w radiu (YouTube, SoundCloud, Spotify…): status = co teraz leci, play, pause, next, previous.",
-            mapOf("action" to mapOf("type" to "string", "enum" to listOf("status", "play", "pause", "next", "previous"))),
-            listOf("action"),
+            "Steruje odtwarzaczem w radiu (YouTube, SoundCloud, Spotify…) tak jak przyciski w widżecie odtwarzacza: status = co teraz leci, play = wznów odtwarzanie, pause, next, previous. Prośby typu „wznów / puść dalej / włącz SoundCloud z powrotem” to play tutaj – NIE otwieraj aplikacji przez open_app. Aplikację otwórz tylko, gdy to narzędzie zwróci, że nie da się wznowić.",
+            mapOf(
+                "action" to mapOf("type" to "string", "enum" to listOf("status", "play", "pause", "next", "previous")),
+                "app" to mapOf("type" to "string", "description" to "Którego odtwarzacza dotyczy, np. SoundCloud; pusty tekst = ten, który gra albo grał ostatnio"),
+            ),
+            listOf("action", "app"),
         ),
         Def(
             "camera_snapshot",
@@ -177,7 +180,7 @@ private object AssistantTools {
             "Nawigacja uruchomiona"
         }
         "play_youtube" -> playYoutube(act, input.optString("query").trim())
-        "media_control" -> mediaControl(act, input.optString("action"))
+        "media_control" -> mediaControl(act, input.optString("action"), input.optString("app").trim())
         "camera_control" -> cameraControl(act, input)
         "home_ac" -> homeAc(input.optString("action"), input.optDouble("value", 0.0))
         "radio_control" -> radioControl(act, input.optString("action"), input.optInt("value"))
@@ -215,17 +218,53 @@ private object AssistantTools {
     }
 
     /** Sterowanie odtwarzaczem przez MediaSession; wymaga dostępu do powiadomień (ten sam co trasa z Map). */
-    private fun mediaControl(act: MainActivity, action: String): String {
-        if (!NavListener.isEnabled(act)) return "Kokpit nie ma dostępu do powiadomień (Ustawienia → Nawigacja → Podgląd trasy) – bez niego nie steruje odtwarzaczem"
-        val msm = act.getSystemService(android.media.session.MediaSessionManager::class.java)
-        val sessions = msm.getActiveSessions(android.content.ComponentName(act, NavListener::class.java))
-        val s = sessions.firstOrNull { it.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING }
-            ?: sessions.firstOrNull { it.packageName == YOUTUBE } ?: sessions.firstOrNull()
-            ?: return "Nic teraz nie gra i żaden odtwarzacz nie jest otwarty"
-        val app = runCatching { act.packageManager.getApplicationLabel(act.packageManager.getApplicationInfo(s.packageName, 0)).toString() }.getOrDefault(s.packageName)
+    private fun mediaControl(act: MainActivity, action: String, wanted: String): String {
+        val pm = act.packageManager
+        fun label(pkg: String) = runCatching { pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg)
+        fun matches(pkg: String) = wanted.isEmpty() || label(pkg).contains(wanted, true) || pkg.contains(wanted.replace(" ", ""), true)
+        val sessions = if (NavListener.isEnabled(act)) runCatching {
+            act.getSystemService(android.media.session.MediaSessionManager::class.java)
+                .getActiveSessions(android.content.ComponentName(act, NavListener::class.java))
+        }.getOrDefault(emptyList()) else emptyList()
+        val playingState = android.media.session.PlaybackState.STATE_PLAYING
+        val s = sessions.filter { matches(it.packageName) }.let { list ->
+            list.firstOrNull { it.playbackState?.state == playingState } ?: list.firstOrNull()
+        }
+        if (s == null) {
+            if (action == "status") return if (sessions.isEmpty()) "Żaden odtwarzacz nie jest otwarty" else "Otwarte odtwarzacze: " + sessions.joinToString { label(it.packageName) }
+            // brak aktywnej sesji (np. odtwarzacz długo wstrzymany): przycisk multimediów jak w widżecie –
+            // Android przekazuje go ostatniemu odtwarzaczowi, który sam wznawia muzykę bez otwierania aplikacji
+            val code = when (action) {
+                "play" -> android.view.KeyEvent.KEYCODE_MEDIA_PLAY
+                "pause" -> android.view.KeyEvent.KEYCODE_MEDIA_PAUSE
+                "next" -> android.view.KeyEvent.KEYCODE_MEDIA_NEXT
+                else -> android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS
+            }
+            val target = wanted.takeIf { it.isNotEmpty() }?.let { w -> act.apps.value.firstOrNull { it.label.contains(w, true) }?.packageName }
+            if (target != null) {
+                // przycisk wprost do wybranej aplikacji (jej odbiornik przycisków multimediów)
+                for (a in listOf(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.ACTION_UP)) {
+                    act.sendBroadcast(android.content.Intent(android.content.Intent.ACTION_MEDIA_BUTTON).setPackage(target)
+                        .putExtra(android.content.Intent.EXTRA_KEY_EVENT, android.view.KeyEvent(a, code)))
+                }
+            } else {
+                val am = act.getSystemService(android.media.AudioManager::class.java)
+                am.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, code))
+                am.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, code))
+            }
+            Thread.sleep(1500)
+            val nowPlaying = sessions.isEmpty() && NavListener.isEnabled(act) && runCatching {
+                act.getSystemService(android.media.session.MediaSessionManager::class.java)
+                    .getActiveSessions(android.content.ComponentName(act, NavListener::class.java))
+                    .any { it.playbackState?.state == playingState && matches(it.packageName) }
+            }.getOrDefault(false)
+            return "Wysłano przycisk $action do ${target?.let(::label) ?: "ostatniego odtwarzacza"}" +
+                if (nowPlaying) " – gra." else " (nie widać potwierdzenia; jeśli rozmówca powie, że nie gra, dopiero wtedy otwórz aplikację)."
+        }
+        val app = label(s.packageName)
         val md = s.metadata
         val now = listOfNotNull(md?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE), md?.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)).joinToString(" – ")
-        val playing = s.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+        val playing = s.playbackState?.state == playingState
         val t = s.transportControls
         when (action) {
             "play" -> t.play()
@@ -602,7 +641,7 @@ object Assistant {
             lines += ChatLine(false, reply)
             if (Prefs.aiSpeak) act.speak(reply)
             // bez bloku „Asystent” na ekranie (wywołanie przyciskiem głosowym) pokaż odpowiedź w dymku
-            if (act.layout.value.none { it.id == BlockId.ASSISTANT }) android.widget.Toast.makeText(act, reply, android.widget.Toast.LENGTH_LONG).show()
+            if (!VoiceActivity.open && act.layout.value.none { it.id == BlockId.ASSISTANT }) android.widget.Toast.makeText(act, reply, android.widget.Toast.LENGTH_LONG).show()
         }
     }
 

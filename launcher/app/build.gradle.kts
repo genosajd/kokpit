@@ -5,6 +5,10 @@ plugins {
 }
 
 android {
+    androidResources {
+        // model mowy (vosk-pl.zip) jest już spakowany – bez ponownej kompresji
+        noCompress += "zip"
+    }
     namespace = "pl.lawinski.radiolauncher"
     compileSdk = 35
 
@@ -12,8 +16,8 @@ android {
         applicationId = "pl.lawinski.radiolauncher"
         minSdk = 26
         targetSdk = 35
-        versionCode = 13
-        versionName = "0.3.9"
+        versionCode = 14
+        versionName = "0.3.10"
         // radio: arm64 (Snapdragon 668S); x86_64 tylko dla emulatora
         // -PdoAuta: tylko arm64, mniejszy plik do instalacji w radiu
         ndk { abiFilters += if (project.hasProperty("doAuta")) listOf("arm64-v8a") else listOf("arm64-v8a", "x86_64") }
@@ -56,6 +60,9 @@ dependencies {
 
     // asystent AI w bloku „Asystent” (Claude); OpenAI idzie zwykłym HTTPS
     implementation("com.anthropic:anthropic-java:3.6.0")
+    // hasło „OK BMW” rozpoznawane w radiu, bez internetu (model: assets/vosk-pl.zip, pobierz_model_mowy.sh)
+    implementation("com.alphacephei:vosk-android:0.3.75")
+    implementation("net.java.dev.jna:jna:5.18.1@aar")
 
     // model 3D auta (.glb) obracany palcem
     val filament = "1.56.0"

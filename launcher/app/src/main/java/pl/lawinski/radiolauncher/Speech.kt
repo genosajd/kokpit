@@ -75,7 +75,14 @@ object Speech {
         onResult(list)
     }
 
+    /** ostatnio czytany tekst (Hotword ignoruje „BMW” z własnych głośników) */
+    var lastText = ""
+        private set
+
+    fun isSpeaking() = tts?.isSpeaking == true || runCatching { player?.isPlaying == true }.getOrDefault(false)
+
     fun speak(ctx: Context, text: String) {
+        lastText = text
         val clean = text.replace(Regex("[*_#`>|]"), "").replace(Regex("\\s+"), " ").trim()
         if (clean.isEmpty()) return
         stop()
