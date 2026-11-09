@@ -40,7 +40,7 @@ Powrót do starego launchera: Ustawienia → Aplikacje → Domyślne aplikacje �
 ```bash
 cd launcher
 export JAVA_HOME=<JDK 17+> ANDROID_HOME=<Android SDK>
-./pobierz_model_mowy.sh              # raz: model mowy do „OK BMW” (53 MB, assets/vosk-pl.zip)
+../pobierz_model_mowy.sh             # raz: model mowy do „OK BMW” (53 MB, assets/vosk-pl.zip)
 ./gradlew assembleRelease -PdoAuta   # tylko arm64, do radia
 ./gradlew assembleRelease            # arm64 + x86_64, także na emulator
 ```
