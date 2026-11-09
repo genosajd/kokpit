@@ -78,6 +78,27 @@ object XiaomiCamServer {
     fun url(name: String) = RTSP + Uri.encode(name) + "?video"
 }
 
+/** Kamery, które grają tylko na dekoderze programowym (strumień większy niż 1920x1088). */
+private object SoftwareDecode {
+    val cameras = mutableSetOf<String>()
+}
+
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+private fun buildPlayer(ctx: android.content.Context, software: Boolean): ExoPlayer {
+    val selector = if (!software) androidx.media3.exoplayer.mediacodec.MediaCodecSelector.DEFAULT
+    else androidx.media3.exoplayer.mediacodec.MediaCodecSelector { mime, secure, tunneling ->
+        val all = androidx.media3.exoplayer.mediacodec.MediaCodecUtil.getDecoderInfos(mime, secure, tunneling)
+        // dekodery Google (c2.android.*, OMX.google.*) – pewnie programowe; „softwareOnly” bywa ustawione
+        // też dla dekoderów sprzętowych emulatora (c2.goldfish.*), które padają na 2.5K
+        all.filter { it.name.startsWith("c2.android.") || it.name.startsWith("OMX.google.") }
+            .ifEmpty { all.filter { it.softwareOnly } }.ifEmpty { all }
+    }
+    val renderers = androidx.media3.exoplayer.DefaultRenderersFactory(ctx)
+        .setMediaCodecSelector(selector)
+        .setEnableDecoderFallback(true)
+    return ExoPlayer.Builder(ctx, renderers).build().apply { volume = 0f }
+}
+
 /**
  * Obraz z kamery na żywo (RTSP po TCP). Przy błędzie co 10 s próbuje ponownie,
  * a [onState] dostaje true, gdy obraz leci.
@@ -88,7 +109,8 @@ fun LiveCameraView(name: String, modifier: Modifier = Modifier, onProblem: (Stri
     val ctx = LocalContext.current
     var attempt by remember { mutableIntStateOf(0) }
     var failed by remember { mutableStateOf(false) }
-    val player = remember(name, attempt) { ExoPlayer.Builder(ctx).build().apply { volume = 0f } }
+    val soft = name in SoftwareDecode.cameras
+    val player = remember(name, attempt) { buildPlayer(ctx, soft) }
 
     DisposableEffect(player) {
         val listener = object : Player.Listener {
@@ -106,6 +128,16 @@ fun LiveCameraView(name: String, modifier: Modifier = Modifier, onProblem: (Stri
                     error.errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED ||
                     // dekoder rusza, ale pada na pierwszej klatce (tak było z 2560x1440 HEVC)
                     ((error as? androidx.media3.exoplayer.ExoPlaybackException)?.rendererFormat?.let { it.width > 1920 || it.height > 1088 } == true)
+                if (!soft && (tooBig || error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED)) {
+                    // sprzętowy dekoder nie przyjmuje 2.5K (radio: maks. 1920x1088) albo pada w trakcie
+                    // (emulator: c2.goldfish.hevc nawet przy 720p) – od razu próba dekoderem programowym,
+                    // jak w aplikacji Xiaomi Cam (więcej pracy dla procesora)
+                    SoftwareDecode.cameras += name
+                    onProblem("Przełączam na dekoder programowy…")
+                    onState(false)
+                    attempt++
+                    return
+                }
                 onProblem(if (tooBig) "Radio nie odtworzy obrazu 2.5K – w Xiaomi Cam wybierz 720p" else null)
                 failed = true
                 onState(false)

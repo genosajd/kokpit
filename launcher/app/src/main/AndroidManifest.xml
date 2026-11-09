@@ -13,6 +13,8 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
+        <!-- asystent AI: obracanie kamerą przez Xiaomi Cam (ControlProvider) -->
+        <provider android:authorities="pl.lawinski.xiaomicam.control" />
         <!-- asystent AI: rozpoznawanie mowy i czytanie odpowiedzi -->
         <intent>
             <action android:name="android.speech.action.RECOGNIZE_SPEECH" />

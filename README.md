@@ -11,8 +11,8 @@ Kotlin + Jetpack Compose, ekran 2560x720.
 - **Dane z auta przez moduł CAN radia:** paliwo w litrach, otwarte drzwi i klapa (widok z góry), bieg, ostrzeżenie o niezapiętym pasie (domyślnie wyłączone), temperatura zewnętrzna, prędkość (awaryjnie z GPS).
 - Zdjęcie auta albo model 3D obracany palcem (Filament).
 - Trasa z powiadomień Map Google i Waze; przyciski Dom i Praca otwierają miejsca zapisane w Mapach, plus trzecie miejsce z własną nazwą (np. etykieta z Map).
-- **Blok „Asystent” (AI):** rozmowa z Claude (Anthropic) albo OpenAI, głosem lub pisaniem, odpowiedzi czytane na głos (głosy Google albo OpenAI). Zna stan auta, włącza nawigację, uruchamia i steruje YouTube/odtwarzaczem, zmienia głośność, jasność i wygląd. Wywołanie też przyciskiem głosowym (polecenie głosowe Androida). Klucz API wpisuje się w Ustawieniach → Asystent AI i zostaje tylko w radiu; za zapytania płaci się u dostawcy.
-- Podgląd kamery Xiaomi na żywo (RTSP z aplikacji Xiaomi Cam z serwerem w tle).
+- **Blok „Asystent” (AI):** rozmowa z Claude (Anthropic) albo OpenAI, głosem lub pisaniem, odpowiedzi czytane na głos (głosy Google albo OpenAI). Zna stan auta, włącza nawigację, uruchamia i steruje YouTube/odtwarzaczem, zmienia głośność, jasność i wygląd, robi zdjęcie z kamery Xiaomi i opisuje je, obraca kamerą (punkty, zoom – wymaga Xiaomi Cam 1.35+). Wywołanie też przyciskiem głosowym (polecenie głosowe Androida). Klucz API wpisuje się w Ustawieniach → Asystent AI i zostaje tylko w radiu; za zapytania płaci się u dostawcy.
+- Podgląd kamery Xiaomi na żywo (RTSP z aplikacji Xiaomi Cam z serwerem w tle); gdy dekoder sprzętowy nie da rady, przełącza się na programowy.
 - Przycisk „iDrive” (oryginalny ekran BMW) i „Radio” (ustawienia Witstek).
 - Podzielony ekran Mapy + YouTube.
 

@@ -39,6 +39,9 @@ import java.util.Locale
 /** Jedna wypowiedź w rozmowie widoczna w bloku. */
 data class ChatLine(val fromUser: Boolean, val text: String)
 
+/** Wynik narzędzia: tekst i opcjonalnie zdjęcie JPEG (base64). */
+private class ToolOut(val text: String, val jpeg: String? = null)
+
 /** Narzędzia asystenta – wspólne dla obu dostawców. */
 private object AssistantTools {
     class Def(val name: String, val description: String, val props: Map<String, Map<String, Any>>, val required: List<String>)
@@ -83,6 +86,23 @@ private object AssistantTools {
             listOf("action"),
         ),
         Def(
+            "camera_snapshot",
+            "Robi zdjęcie z kamery Xiaomi (aktualna klatka) i pokazuje Ci je, żebyś mógł opisać, co widać – np. czy ktoś jest przed domem, czy auto stoi, jaka pogoda. Pusta nazwa = kamera z bloku Kamera; zła nazwa zwraca listę kamer.",
+            mapOf("camera" to mapOf("type" to "string", "description" to "Nazwa kamery, np. „Dom przód”; pusty tekst = bieżąca")),
+            listOf("camera"),
+        ),
+        Def(
+            "camera_control",
+            "Steruje kamerą Xiaomi z obrotem: list = kamery i co umieją, move = obrót w kierunku direction przez amount sekund (0.1–4; ok. 1 s to niewielki obrót), points = zapisane punkty 1–3, goto = obrót do punktu nr amount, zoom = przybliżenie amount (1–9). Po obrocie zrób camera_snapshot, żeby zobaczyć efekt. Pusta nazwa kamery = kamera z bloku Kamera.",
+            mapOf(
+                "action" to mapOf("type" to "string", "enum" to listOf("list", "move", "points", "goto", "zoom")),
+                "camera" to mapOf("type" to "string", "description" to "Nazwa kamery; pusty tekst = bieżąca"),
+                "direction" to mapOf("type" to "string", "enum" to listOf("left", "right", "up", "down", "none")),
+                "amount" to mapOf("type" to "number", "description" to "move: sekundy, goto: numer punktu, zoom: przybliżenie; inaczej 0"),
+            ),
+            listOf("action", "camera", "direction", "amount"),
+        ),
+        Def(
             "radio_control",
             "Obsługa radia i Kokpitu. action: volume_set (value 0–100 %), volume_up, volume_down, mute, unmute, brightness_set (value 0–100 %), idrive_screen (oryginalny ekran BMW iDrive), split_screen (Mapy + YouTube obok siebie), radio_settings (ustawienia radia Witstek), android_settings, home (ekran Kokpitu), theme (value: 0 = Płaski, 1 = BMW iDrive, 2 = M Sport), status (głośność i jasność). Dla akcji bez liczby podaj value 0.",
             mapOf(
@@ -96,7 +116,41 @@ private object AssistantTools {
         ),
     )
 
-    fun run(act: MainActivity, name: String, input: JSONObject): String = when (name) {
+    fun run(act: MainActivity, name: String, input: JSONObject): ToolOut =
+        if (name == "camera_snapshot") snapshot(act, input.optString("camera").trim()) else ToolOut(runText(act, name, input))
+
+    /** Klatka z kamery: go2rtc w Xiaomi Cam daje krótki plik api/frame.mp4, z którego bierzemy pierwszy obraz. */
+    private fun snapshot(act: MainActivity, wanted: String): ToolOut {
+        val names = kotlinx.coroutines.runBlocking { XiaomiCamServer.camerasWaking(act) }
+            ?: return ToolOut("Xiaomi Cam nie odpowiada – kamera niedostępna (aplikacja i jej serwer w tle muszą działać)")
+        val cams = names.filter { !it.startsWith("__") }
+        val w = wanted.lowercase()
+        val cam = when {
+            wanted.isEmpty() -> act.liveCamera.value.takeIf { it in cams } ?: cams.firstOrNull()
+            else -> cams.firstOrNull { it.lowercase() == w } ?: cams.firstOrNull { w in it.lowercase() || it.lowercase() in w }
+        } ?: return ToolOut("Nie ma kamery „$wanted”. Kamery: ${cams.joinToString()}")
+        val f = java.io.File(act.cacheDir, "frame.mp4")
+        val c = URL("http://127.0.0.1:11984/api/frame.mp4?src=" + java.net.URLEncoder.encode(cam, "UTF-8").replace("+", "%20")).openConnection() as HttpURLConnection
+        c.connectTimeout = 5000
+        c.readTimeout = 30000
+        if (c.responseCode != 200) return ToolOut("Kamera „$cam” nie dała obrazu (HTTP ${c.responseCode})")
+        c.inputStream.use { inp -> f.outputStream().use { inp.copyTo(it) } }
+        val mmr = android.media.MediaMetadataRetriever()
+        val bmp = try {
+            mmr.setDataSource(f.path)
+            mmr.getFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+        } finally {
+            mmr.release()
+        } ?: return ToolOut("Nie udało się odczytać klatki z kamery „$cam”")
+        val scale = minOf(1f, 1280f / bmp.width)
+        val small = if (scale < 1f) android.graphics.Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true) else bmp
+        val out = java.io.ByteArrayOutputStream()
+        small.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, out)
+        val time = java.text.SimpleDateFormat("HH:mm", Locale("pl", "PL")).format(java.util.Date())
+        return ToolOut("Zdjęcie z kamery „$cam” zrobione o $time.", android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP))
+    }
+
+    private fun runText(act: MainActivity, name: String, input: JSONObject): String = when (name) {
         "car_status" -> carStatus(act)
         "navigate" -> {
             val dest = input.optString("destination").trim()
@@ -115,6 +169,7 @@ private object AssistantTools {
         }
         "play_youtube" -> playYoutube(act, input.optString("query").trim())
         "media_control" -> mediaControl(act, input.optString("action"))
+        "camera_control" -> cameraControl(act, input)
         "radio_control" -> radioControl(act, input.optString("action"), input.optInt("value"))
         "open_app" -> openApp(act, input.optString("app").trim(), input.optString("search").trim())
         else -> "Nieznane narzędzie $name"
@@ -170,6 +225,41 @@ private object AssistantTools {
             else -> return "$app: ${if (playing) "gra" else "wstrzymane"}${if (now.isNotBlank()) " – $now" else ""}"
         }
         return "$app: wykonano $action${if (now.isNotBlank()) " (było: $now)" else ""}"
+    }
+
+    /** Obrót, punkty i zoom przez Xiaomi Cam (ControlProvider przyjmuje tylko Kokpit). */
+    private fun cameraControl(act: MainActivity, input: JSONObject): String {
+        val action = input.optString("action")
+        val amount = input.optDouble("amount", 0.0)
+        val uri = android.net.Uri.parse("content://pl.lawinski.xiaomicam.control")
+        fun call(method: String, cam: String, ex: android.os.Bundle = android.os.Bundle()): String {
+            val b = try {
+                act.contentResolver.call(uri, method, cam, ex)
+            } catch (e: IllegalArgumentException) {
+                return "Xiaomi Cam nie ma sterowania dla Kokpitu – zaktualizuj ją do wersji 1.35 lub nowszej"
+            } catch (e: SecurityException) {
+                return "Xiaomi Cam nie pozwala Kokpitowi sterować kamerą"
+            } ?: return "Xiaomi Cam nie odpowiada"
+            return if (b.getBoolean("ok")) b.getString("result").orEmpty() else "Błąd kamery: ${b.getString("error")}"
+        }
+        val list = call("cameras", "")
+        if (action == "list" || !list.trimStart().startsWith("[")) return list
+        val cams = JSONArray(list).let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
+        val wanted = input.optString("camera").trim().lowercase()
+        val cam = (if (wanted.isEmpty()) cams.firstOrNull { it.getString("name") == act.liveCamera.value } ?: cams.firstOrNull { it.optBoolean("ptz") }
+            else cams.firstOrNull { it.getString("name").lowercase() == wanted } ?: cams.firstOrNull { wanted in it.getString("name").lowercase() })
+            ?: return "Nie ma takiej kamery. Kamery: $list"
+        val name = cam.getString("name")
+        return name + ": " + when (action) {
+            "move" -> call("move", name, android.os.Bundle().apply {
+                putString("direction", input.optString("direction"))
+                putInt("ms", (amount.coerceIn(0.1, 4.0) * 1000).toInt())
+            })
+            "points" -> call("points", name)
+            "goto" -> call("goto", name, android.os.Bundle().apply { putInt("slot", amount.toInt()) })
+            "zoom" -> call("zoom", name, android.os.Bundle().apply { putDouble("value", amount) })
+            else -> "nieznana akcja $action"
+        }
     }
 
     private fun radioControl(act: MainActivity, action: String, value: Int): String {
@@ -270,7 +360,7 @@ private object AssistantTools {
 private const val SYSTEM_PROMPT = """Jesteś asystentem w aucie: ekran radia w BMW F11 Touring z launcherem Kokpit F11. Rozmawia z Tobą kierowca albo pasażer.
 Odpowiadaj po polsku, krótko i naturalnie, zwykle 1–3 zdaniami – odpowiedzi są czytane na głos, więc pisz zwykłym tekstem, bez list, nagłówków, tabel i znaczników Markdown.
 Kierowca nie powinien czytać długich tekstów w czasie jazdy, dlatego najważniejsze mów na początku.
-Masz narzędzia: car_status (stan auta, położenie, trasa), navigate i open_saved_place (włączają nawigację w Mapach Google), open_app (uruchamia aplikację w radiu i może w niej wyszukać), play_youtube (od razu odtwarza w YouTube to, o co ktoś prosi), media_control (pauza, wznowienie, następny, poprzedni, co teraz gra) i radio_control (głośność, jasność, ekran BMW iDrive, podzielony ekran, ustawienia, wygląd Kokpitu). Gdy ktoś prosi o włączenie muzyki lub filmu, użyj play_youtube. Gdy pytanie dotyczy auta, paliwa, miejsca albo trasy, najpierw sprawdź car_status. Gdy ktoś prosi o trasę, od razu włącz nawigację i krótko to potwierdź."""
+Masz narzędzia: car_status (stan auta, położenie, trasa), navigate i open_saved_place (włączają nawigację w Mapach Google), open_app (uruchamia aplikację w radiu i może w niej wyszukać), play_youtube (od razu odtwarza w YouTube to, o co ktoś prosi), media_control (pauza, wznowienie, następny, poprzedni, co teraz gra) i radio_control (głośność, jasność, ekran BMW iDrive, podzielony ekran, ustawienia, wygląd Kokpitu) camera_control (obrót kamery, punkty, zoom) i camera_snapshot (aktualne zdjęcie z kamery Xiaomi – gdy ktoś pyta, co widać na kamerze, zawsze zrób nowe zdjęcie). Gdy ktoś prosi o włączenie muzyki lub filmu, użyj play_youtube. Gdy pytanie dotyczy auta, paliwa, miejsca albo trasy, najpierw sprawdź car_status. Gdy ktoś prosi o trasę, od razu włącz nawigację i krótko to potwierdź."""
 
 /** Rozmowa z jednym dostawcą; trzyma całą historię, żeby asystent pamiętał kontekst. */
 private interface ChatEngine {
@@ -324,9 +414,19 @@ private class ClaudeEngine(private val act: MainActivity, apiKey: String, privat
                         val out = try {
                             AssistantTools.run(act, use.name(), JSONObject(use._input().convert(Map::class.java) as Map<*, *>))
                         } catch (e: Exception) {
-                            "Błąd: ${e.message}"
+                            ToolOut("Błąd: ${e.message}")
                         }
-                        ContentBlockParam.ofToolResult(ToolResultBlockParam.builder().toolUseId(use.id()).content(out).build())
+                        val b = ToolResultBlockParam.builder().toolUseId(use.id())
+                        if (out.jpeg == null) b.content(out.text)
+                        else b.contentOfBlocks(listOf(
+                            ToolResultBlockParam.Content.Block.ofText(out.text),
+                            ToolResultBlockParam.Content.Block.ofImage(
+                                com.anthropic.models.messages.Base64ImageSource.builder()
+                                    .mediaType(com.anthropic.models.messages.Base64ImageSource.MediaType.IMAGE_JPEG)
+                                    .data(out.jpeg).build()
+                            ),
+                        ))
+                        ContentBlockParam.ofToolResult(b.build())
                     }
                     history += MessageParam.ofUserOfContentBlockParams(results)
                 }
@@ -365,6 +465,7 @@ private class OpenAiEngine(private val act: MainActivity, private val apiKey: St
             val msg = post(body).getJSONArray("choices").getJSONObject(0).getJSONObject("message")
             history.put(msg)
             val calls = msg.optJSONArray("tool_calls")
+            val images = mutableListOf<String>()
             if (calls == null || calls.length() == 0) return msg.optString("content").trim().ifEmpty { "…" }
             for (i in 0 until calls.length()) {
                 val call = calls.getJSONObject(i)
@@ -372,9 +473,18 @@ private class OpenAiEngine(private val act: MainActivity, private val apiKey: St
                 val out = try {
                     AssistantTools.run(act, fn.getString("name"), JSONObject(fn.optString("arguments").ifBlank { "{}" }))
                 } catch (e: Exception) {
-                    "Błąd: ${e.message}"
+                    ToolOut("Błąd: ${e.message}")
                 }
-                history.put(JSONObject().put("role", "tool").put("tool_call_id", call.getString("id")).put("content", out))
+                history.put(JSONObject().put("role", "tool").put("tool_call_id", call.getString("id")).put("content", out.text + if (out.jpeg != null) " Zdjęcie w następnej wiadomości." else ""))
+                out.jpeg?.let { images += it }
+            }
+            // wiadomość narzędzia w Chat Completions nie przyjmuje obrazu – wysyłamy go zaraz po wynikach
+            if (images.isNotEmpty()) {
+                history.put(JSONObject().put("role", "user").put("content", JSONArray().apply {
+                    put(JSONObject().put("type", "text").put("text", "Zdjęcie z kamery do opisania:"))
+                    images.forEach { put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", "data:image/jpeg;base64,$it"))) }
+                }))
+                images.clear()
             }
         }
         return "Nie udało się dokończyć odpowiedzi."
