@@ -31,6 +31,7 @@ class MainActivity : ComponentActivity() {
     /** Lista aplikacji; odświeżana po instalacji lub usunięciu aplikacji. */
     val apps = mutableStateOf<List<AppEntry>>(emptyList())
     val cameraWidgetId = mutableIntStateOf(-1)
+    val blockWidgetId = mutableIntStateOf(-1)
     val liveCamera = mutableStateOf("")
     val carModelPath = mutableStateOf("")
     val layout = mutableStateOf(LayoutStore.DEFAULT)
@@ -45,6 +46,8 @@ class MainActivity : ComponentActivity() {
     val visible = mutableStateOf(false)
 
     private var pendingWidgetId = -1
+    /** true: dodawany widżet trafi do klocka „Widżet”, false: do klocka kamery */
+    private var pendingForBlock = false
 
     private val bindLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
         if (r.resultCode == RESULT_OK) configureWidget(pendingWidgetId) else dropPending()
@@ -78,6 +81,7 @@ class MainActivity : ComponentActivity() {
         widgetHost = AppWidgetHost(this, WIDGET_HOST_ID)
         location = LocationRepo(this)
         cameraWidgetId.intValue = Prefs.cameraWidgetId
+        blockWidgetId.intValue = Prefs.blockWidgetId
         liveCamera.value = Prefs.liveCamera
         CarModel.installDefault(this)
         CanSource.start(this)
@@ -188,6 +192,7 @@ class MainActivity : ComponentActivity() {
     fun addCameraWidget() {
         val id = widgetHost.allocateAppWidgetId()
         pendingWidgetId = id
+        pendingForBlock = false
         val provider = widgetManager.installedProviders.firstOrNull { it.provider.packageName == XIAOMI_CAM }?.provider
         if (provider == null) {
             pickLauncher.launch(Intent(AppWidgetManager.ACTION_APPWIDGET_PICK).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id))
@@ -202,6 +207,29 @@ class MainActivity : ComponentActivity() {
                     .putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER, provider)
             )
         }
+    }
+
+    /** Widżet wybrany z listy Kokpitu do klocka „Widżet”. */
+    fun addBlockWidget(provider: android.content.ComponentName) {
+        val id = widgetHost.allocateAppWidgetId()
+        pendingWidgetId = id
+        pendingForBlock = true
+        if (widgetManager.bindAppWidgetIdIfAllowed(id, provider)) {
+            configureWidget(id)
+        } else {
+            bindLauncher.launch(
+                Intent(AppWidgetManager.ACTION_APPWIDGET_BIND)
+                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER, provider)
+            )
+        }
+    }
+
+    fun removeBlockWidget() {
+        val id = Prefs.blockWidgetId
+        if (id != -1) widgetHost.deleteAppWidgetId(id)
+        Prefs.blockWidgetId = -1
+        blockWidgetId.intValue = -1
     }
 
     fun removeCameraWidget() {
@@ -229,6 +257,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun saveWidget(id: Int) {
+        if (pendingForBlock) {
+            val old = Prefs.blockWidgetId
+            if (old != -1 && old != id) widgetHost.deleteAppWidgetId(old)
+            Prefs.blockWidgetId = id
+            blockWidgetId.intValue = id
+            pendingWidgetId = -1
+            return
+        }
         val old = Prefs.cameraWidgetId
         if (old != -1 && old != id) widgetHost.deleteAppWidgetId(old)
         Prefs.cameraWidgetId = id

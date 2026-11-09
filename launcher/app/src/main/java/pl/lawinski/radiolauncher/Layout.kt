@@ -45,6 +45,7 @@ enum class BlockId(val title: String, val minW: Int, val minH: Int) {
     NAV("Nawigacja", 1, 1),
     CAMERA("Kamera", 1, 1),
     WEATHER("Pogoda", 1, 1),
+    WIDGET("Widżet", 1, 1),
 }
 
 /** Położenie klocka na siatce 8 × 2: kolumna, rząd, szerokość, wysokość. */
@@ -154,7 +155,12 @@ object LayoutStore {
             val s = Slot(id, c, r, id.minW, id.minH)
             if (fits(slots, s)) return slots + s
         }
-        return null
+        // siatka pełna: zwęź najszerszy klocek o jedną kolumnę z prawej i wstaw nowy w zwolnione miejsce
+        val wide = slots.filter { it.w > it.id.minW }.maxByOrNull { it.w } ?: return null
+        val narrowed = wide.copy(w = wide.w - 1)
+        val s = Slot(id, wide.c + wide.w - 1, wide.r, 1, wide.h)
+        val next = slots.map { if (it == wide) narrowed else it } + s
+        return if (s.inBounds && next.none { a -> next.any { b -> a !== b && a.overlaps(b) } }) next else null
     }
 }
 

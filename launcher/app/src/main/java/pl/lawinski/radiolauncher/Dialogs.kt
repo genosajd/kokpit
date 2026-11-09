@@ -26,6 +26,31 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridScope
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.DashboardCustomize
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DirectionsCar
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.MyLocation
+import androidx.compose.material.icons.outlined.Navigation
+import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.compose.material.icons.outlined.RestartAlt
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.VerticalSplit
+import androidx.compose.material.icons.outlined.Videocam
+import androidx.compose.material.icons.outlined.ViewInAr
+import androidx.compose.material.icons.outlined.Warning
+import androidx.compose.material.icons.outlined.Widgets
+import androidx.compose.material.icons.outlined.Work
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
@@ -41,6 +66,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,13 +80,13 @@ fun Sheet(title: String, onClose: () -> Unit, widthFraction: Float = 0.9f, conte
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(
             Modifier.fillMaxWidth(widthFraction).fillMaxSize(0.92f)
-                .clip(RoundedCornerShape(d(28))).background(CardBg).padding(d(30))
+                .clip(RoundedCornerShape(d(28))).background(LocalTheme.current.block).padding(d(30))
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(title, color = Txt, fontSize = s(34), fontWeight = FontWeight.Medium)
                 Spacer(Modifier.weight(1f))
                 Box(
-                    Modifier.size(d(64)).clip(RoundedCornerShape(d(32))).background(CardHi)
+                    Modifier.size(d(64)).kokpitSurface(d(32))
                         .combinedClickable(onClick = onClose),
                     contentAlignment = Alignment.Center,
                 ) { Icon(Icons.Outlined.Close, "Zamknij", tint = Txt, modifier = Modifier.size(d(36))) }
@@ -93,7 +120,7 @@ fun AppPickerDialog(title: String, apps: List<AppEntry>, onClose: () -> Unit, on
 @Composable
 private fun PickerCell(app: AppEntry?, label: String, onClick: () -> Unit) {
     Column(
-        Modifier.clip(RoundedCornerShape(d(20))).background(CardHi)
+        Modifier.kokpitSurface(d(20))
             .combinedClickable(onClick = onClick).padding(vertical = d(20), horizontal = d(10)),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -106,19 +133,15 @@ private fun PickerCell(app: AppEntry?, label: String, onClick: () -> Unit) {
 
 @Composable
 fun ShortcutMenuDialog(
-    index: Int,
-    count: Int,
     onClose: () -> Unit,
     onReplace: () -> Unit,
-    onMove: (Int) -> Unit,
     onRemove: () -> Unit,
 ) {
     Sheet("Skrót", onClose, widthFraction = 0.4f) {
         Column(verticalArrangement = Arrangement.spacedBy(d(14))) {
             MenuRow("Zamień na inną aplikację", onClick = onReplace)
-            if (index > 0) MenuRow("Przesuń wcześniej", onClick = { onMove(-1) })
-            if (index < count - 1) MenuRow("Przesuń dalej", onClick = { onMove(1) })
             MenuRow("Usuń skrót", color = Color(0xFFFF6B6B), onClick = onRemove)
+            Text("Aby przesunąć skrót, przytrzymaj go i przeciągnij", color = Dim, fontSize = s(20))
         }
     }
 }
@@ -126,7 +149,7 @@ fun ShortcutMenuDialog(
 @Composable
 fun MenuRow(title: String, sub: String? = null, color: Color = Txt, onClick: () -> Unit) {
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(d(18))).background(CardHi)
+        Modifier.fillMaxWidth().kokpitSurface(d(18))
             .combinedClickable(onClick = onClick).padding(horizontal = d(26), vertical = d(20))
     ) {
         Text(title, color = color, fontSize = s(26))
@@ -143,6 +166,7 @@ fun SettingsDialog(
     onPicker: (Dlg.Picker) -> Unit,
     onAddress: (Boolean) -> Unit,
     onCameras: () -> Unit,
+    onWidgets: () -> Unit,
     onEditLayout: () -> Unit,
     onDemo: (Boolean) -> Unit,
     onResetShortcuts: () -> Unit,
@@ -160,43 +184,167 @@ fun SettingsDialog(
     } catch (_: Exception) {
     }
     fun label(key: String) = Apps.find(apps, key)?.label ?: "nie wybrano"
+    var group by remember { mutableStateOf(Prefs.settingsGroup.coerceIn(0, SETTINGS_GROUPS.size - 1)) }
 
-    Sheet("Ustawienia", onClose, widthFraction = 0.6f) {
-        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(d(14))) {
-            MenuRow("Ustawienia radia Witstek", "Dźwięk, system, nawigacja; ustawienia fabryczne w środku (PIN 8888)") { openRadioSettings(act) }
-            MenuRow("Ustawienia Androida", "Wi-Fi, Bluetooth, aplikacje, ekran główny") { open(Settings.ACTION_SETTINGS) }
-            MenuRow("Ustaw jako ekran główny", "Wybierz „Kokpit F11” jako domyślny launcher") { open(Settings.ACTION_HOME_SETTINGS) }
-            MenuRow("Edytuj układ klocków", "Przesuwanie, zmiana rozmiaru, ukrywanie – tylko na postoju") { onEditLayout() }
-            MenuRow("Podgląd trasy", if (navOn) "Włączony" else "Wyłączony – zezwól na dostęp do powiadomień") {
-                open(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+    Sheet("Ustawienia", onClose, widthFraction = 0.94f) {
+        Row(Modifier.fillMaxSize()) {
+            // menu grup po lewej; pokrętłem iDrive najpierw wybierasz grupę, potem kafelek
+            Column(Modifier.width(d(400)).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(d(10))) {
+                SETTINGS_GROUPS.forEachIndexed { i, (title, icon) ->
+                    val on = i == group
+                    Row(
+                        Modifier.fillMaxWidth().kokpitSurface(d(18), fill = on, active = on)
+                            .combinedClickable(onClick = { group = i; Prefs.settingsGroup = i })
+                            .padding(horizontal = d(22), vertical = d(18)),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(icon, null, tint = if (on) LocalTheme.current.activeText else Accent, modifier = Modifier.size(d(32)))
+                        Spacer(Modifier.width(d(16)))
+                        Text(title, color = if (on) LocalTheme.current.activeText else Txt, fontSize = s(24), fontWeight = if (on) FontWeight.Medium else FontWeight.Normal)
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                Text("Kokpit F11 0.3.5", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
             }
-            MenuRow("Podzielony ekran", if (splitOn) "Usługa włączona" else "Wyłączony – włącz „Kokpit F11 – podzielony ekran” w ułatwieniach dostępu") {
-                open(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+            Spacer(Modifier.width(d(26)))
+            LazyVerticalGrid(
+                GridCells.Adaptive(d(440)),
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(d(14)),
+                horizontalArrangement = Arrangement.spacedBy(d(14)),
+            ) {
+                when (group) {
+                    0 -> {
+                items(Themes.all, key = { "theme-" + it.id }) { t ->
+                    ThemeTile(t, selected = themeState.value.id == t.id) {
+                        themeState.value = t
+                        Prefs.theme = t.id
+                    }
+                }
+                    }
+                    1 -> {
+                item { SettingTile(Icons.Outlined.Tune, "Ustawienia radia Witstek", "Dźwięk, system, nawigacja; fabryczne z PIN-em 8888") { openRadioSettings(act) } }
+                item { SettingTile(Icons.Outlined.Settings, "Ustawienia Androida", "Wi-Fi, Bluetooth, aplikacje") { open(Settings.ACTION_SETTINGS) } }
+                item { SettingTile(Icons.Outlined.Home, "Ekran główny", "Wybierz „Kokpit F11” jako domyślny launcher") { open(Settings.ACTION_HOME_SETTINGS) } }
+                if (!locOn) item { SettingTile(Icons.Outlined.MyLocation, "Lokalizacja", "Potrzebna do prędkości i pogody", on = false) { act.requestLocation() } }
+                    }
+                    2 -> {
+                item { SettingTile(Icons.Outlined.DashboardCustomize, "Edytuj układ bloków", "Przesuwanie, rozmiar, ukrywanie – tylko na postoju") { onEditLayout() } }
+                item { SettingTile(Icons.Outlined.RestartAlt, "Przywróć domyślne skróty", "Zastępuje obecne skróty") { onResetShortcuts(); onClose() } }
+                if (act.blockWidgetId.intValue != -1) {
+                    item { SettingTile(Icons.Outlined.Widgets, "Widżet: zmień", "Wybierz inny widżet do bloku „Widżet”") { onWidgets() } }
+                    item { SettingTile(Icons.Outlined.Delete, "Widżet: usuń", "Blok „Widżet” wróci do przycisku dodawania") { act.removeBlockWidget() } }
+                }
+                    }
+                    3 -> {
+                item {
+                    SettingTile(Icons.Outlined.Navigation, "Podgląd trasy", if (navOn) "Manewry z Map Google i Waze" else "Zezwól na dostęp do powiadomień", on = navOn) {
+                        open(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                    }
+                }
+                item { SettingTile(Icons.Outlined.Home, "Adres: Dom", Prefs.home.ifBlank { "z Map Google (zapisany Dom)" }) { onAddress(false) } }
+                item { SettingTile(Icons.Outlined.Work, "Adres: Praca", Prefs.work.ifBlank { "z Map Google (zapisana Praca)" }) { onAddress(true) } }
+                    }
+                    4 -> {
+                item {
+                    SettingTile(Icons.Outlined.VerticalSplit, "Usługa podzielonego ekranu", if (splitOn) "Włączona" else "Włącz „Kokpit F11 – podzielony ekran” w ułatwieniach dostępu", on = splitOn) {
+                        open(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                    }
+                }
+                item { SettingTile(Icons.Outlined.VerticalSplit, "Lewa strona", label(splitLeft)) { onPicker(Dlg.Picker("Lewa strona ekranu") { Prefs.splitLeft = it; splitLeft = it }) } }
+                item { SettingTile(Icons.Outlined.VerticalSplit, "Prawa strona", label(splitRight)) { onPicker(Dlg.Picker("Prawa strona ekranu") { Prefs.splitRight = it; splitRight = it }) } }
+                    }
+                    5 -> {
+                item { SettingTile(Icons.Outlined.Videocam, "Kamera na żywo", live.ifBlank { "wyłączona" }, on = live.isNotBlank()) { onCameras() } }
+                item {
+                    SettingTile(Icons.Outlined.Widgets, "Widżet Xiaomi Cam", if (act.cameraWidgetId.intValue != -1) "Ustawiony (gdy obraz na żywo wyłączony)" else "Brak widżetu") {
+                        onClose(); act.addCameraWidget()
+                    }
+                }
+                if (act.cameraWidgetId.intValue != -1) item { SettingTile(Icons.Outlined.Delete, "Usuń widżet kamery", "Blok kamery wróci do wyboru") { act.removeCameraWidget() } }
+                    }
+                    6 -> {
+                item {
+                    SettingTile(Icons.Outlined.Warning, "Ostrzeżenie „Zapnij pasy”", if (beltOn.value) "Tylko w czasie jazdy; sygnał z CAN może obejmować puste fotele" else "Ostrzega zestaw wskaźników BMW", on = beltOn.value) {
+                        beltOn.value = !beltOn.value; Prefs.beltWarn = beltOn.value
+                    }
+                }
+                item { SettingTile(Icons.Outlined.PlayCircle, "Pokaz danych auta", if (demo) "Paliwo i drzwi to dane przykładowe" else "Paliwo i drzwi z modułu CAN radia", on = demo) { onDemo(!demo) } }
+                item { SettingTile(Icons.Outlined.ViewInAr, "Model 3D: wczytaj własny", if (model.isBlank()) "Wybierz plik .glb (np. z pendrive’a)" else "Wczytany – dotknij, aby zamienić") { act.pickCarModel() } }
+                item { SettingTile(Icons.Outlined.DirectionsCar, "Model 3D: białe F11", "Wbudowany model, obracany palcem") { act.restoreCarModel() } }
+                if (model.isNotBlank()) item { SettingTile(Icons.Outlined.Delete, "Usuń model 3D", "Wróci zdjęcie auta") { act.removeCarModel() } }
+                    }
+                }
             }
-            MenuRow("Podzielony ekran: lewa strona", label(splitLeft)) {
-                onPicker(Dlg.Picker("Lewa strona ekranu") { Prefs.splitLeft = it; splitLeft = it })
-            }
-            MenuRow("Podzielony ekran: prawa strona", label(splitRight)) {
-                onPicker(Dlg.Picker("Prawa strona ekranu") { Prefs.splitRight = it; splitRight = it })
-            }
-            MenuRow("Kamera na żywo", live.ifBlank { "wyłączona" }) { onCameras() }
-            MenuRow("Kamera: widżet Xiaomi Cam", if (act.cameraWidgetId.intValue != -1) "Ustawiony (gdy obraz na żywo wyłączony)" else "Brak widżetu") {
-                onClose(); act.addCameraWidget()
-            }
-            if (act.cameraWidgetId.intValue != -1) MenuRow("Kamera: usuń widżet") { act.removeCameraWidget() }
-            MenuRow("Model 3D auta: wczytaj własny", if (model.isBlank()) "Brak modelu – wybierz plik .glb (np. z pendrive’a)" else "Wczytany – dotknij, aby zamienić na plik .glb") { act.pickCarModel() }
-            MenuRow("Model 3D auta: białe F11", "Wbudowany model, obracany palcem") { act.restoreCarModel() }
-            if (model.isNotBlank()) MenuRow("Usuń model 3D", "Wróci zdjęcie auta") { act.removeCarModel() }
-            MenuRow("Adres: Dom", Prefs.home.ifBlank { "z Map Google (zapisany Dom)" }) { onAddress(false) }
-            MenuRow("Adres: Praca", Prefs.work.ifBlank { "z Map Google (zapisana Praca)" }) { onAddress(true) }
-            if (!locOn) MenuRow("Lokalizacja", "Potrzebna do prędkości i pogody") { act.requestLocation() }
-            MenuRow(
-                "Pokaz danych auta", if (demo) "Włączony – paliwo i otwierane drzwi to dane przykładowe" else "Wyłączony – paliwo i drzwi z modułu CAN radia",
-            ) { onDemo(!demo) }
-            MenuRow("Przywróć domyślne skróty") { onResetShortcuts(); onClose() }
-            MenuRow("Ustawienia Androida") { open(Settings.ACTION_SETTINGS) }
-            Text("Kokpit F11 0.3.4", color = Dim, fontSize = s(18), modifier = Modifier.padding(top = d(6)))
         }
+    }
+}
+
+/** Grupy ustawień w menu po lewej (kolejność = numery w SettingsDialog). */
+private val SETTINGS_GROUPS = listOf(
+        "Wygląd" to Icons.Outlined.Palette,
+        "Radio i system" to Icons.Outlined.Tune,
+        "Ekran" to Icons.Outlined.DashboardCustomize,
+        "Nawigacja" to Icons.Outlined.Navigation,
+        "Podzielony ekran" to Icons.Outlined.VerticalSplit,
+        "Kamera" to Icons.Outlined.Videocam,
+        "Auto" to Icons.Outlined.DirectionsCar,
+)
+
+/** Kafelek ustawienia: ikona, tytuł, opis; `on` pokazuje stan przełącznika (Wł./Wył.). */
+@Composable
+fun SettingTile(icon: ImageVector, title: String, sub: String? = null, on: Boolean? = null, onClick: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().height(d(170)).kokpitSurface(d(20))
+            .combinedClickable(onClick = onClick).padding(horizontal = d(22), vertical = d(18)),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = Accent, modifier = Modifier.size(d(34)))
+            Spacer(Modifier.weight(1f))
+            if (on != null) {
+                Text(
+                    if (on) "WŁ." else "WYŁ.", color = if (on) Color(0xFF031426) else Dim, fontSize = s(16), fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clip(RoundedCornerShape(d(10))).background(if (on) Accent else Color(0x1FFFFFFF))
+                        .padding(horizontal = d(10), vertical = d(3)),
+                )
+            }
+        }
+        Spacer(Modifier.height(d(12)))
+        Text(title, color = Txt, fontSize = s(24), fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (sub != null) Text(sub, color = Dim, fontSize = s(18), maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = d(4)))
+    }
+}
+
+/** Kafelek wyglądu z małym podglądem: tło ekranu, blok, kafelek i kafelek wybrany pokrętłem. */
+@Composable
+fun ThemeTile(t: KokpitTheme, selected: Boolean, onClick: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().kokpitSurface(d(20), active = false)
+            .then(if (selected) Modifier.border(d(3), Accent, RoundedCornerShape(d(20))) else Modifier)
+            .combinedClickable(onClick = onClick).padding(d(14)),
+    ) {
+        Box(Modifier.fillMaxWidth().height(d(120)).clip(RoundedCornerShape(d(14))).background(t.screen).padding(d(12))) {
+            Row(
+                Modifier.fillMaxSize().clip(RoundedCornerShape(d(12))).background(t.block).border(1.dp, t.blockEdge, RoundedCornerShape(d(12))).padding(d(12)),
+                horizontalArrangement = Arrangement.spacedBy(d(10)),
+            ) {
+                Box(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(d(10))).background(t.surface).then(t.surfaceEdge?.let { Modifier.border(1.dp, it, RoundedCornerShape(d(10))) } ?: Modifier))
+                Box(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(d(10))).background(t.selected).border(d(3), t.selectedRing, RoundedCornerShape(d(10))))
+                Column(Modifier.weight(1.4f).fillMaxHeight(), verticalArrangement = Arrangement.Center) {
+                    Text("48", color = Txt, fontSize = s(34), fontWeight = FontWeight.Light,
+                        style = t.speed?.let { androidx.compose.ui.text.TextStyle(brush = it) } ?: androidx.compose.ui.text.TextStyle.Default)
+                    Box(Modifier.padding(top = d(6)).fillMaxWidth().height(d(8)).clip(RoundedCornerShape(d(4))).background(Color(0x14FFFFFF))) {
+                        Box(Modifier.fillMaxWidth(0.6f).fillMaxHeight().background(t.fuel))
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(d(10)))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(t.name, color = Txt, fontSize = s(24), fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+            if (selected) Icon(Icons.Outlined.CheckCircle, "Wybrany", tint = Accent, modifier = Modifier.size(d(30)))
+        }
+        Text(t.description, color = Dim, fontSize = s(18), maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -243,3 +391,50 @@ fun AddressDialog(work: Boolean, onClose: () -> Unit) {
     )
 }
 
+
+/** Widżet do klocka „Widżet”: lista dostawców widżetów z zainstalowanych aplikacji. */
+private class WidgetChoice(val provider: android.content.ComponentName, val label: String, val app: String, val icon: androidx.compose.ui.graphics.ImageBitmap?)
+
+@Composable
+fun WidgetPickerDialog(act: MainActivity, onClose: () -> Unit, onPick: (android.content.ComponentName) -> Unit) {
+    val list by produceState<List<WidgetChoice>?>(null) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val pm = act.packageManager
+            val dpi = act.resources.displayMetrics.densityDpi
+            act.widgetManager.installedProviders.mapNotNull { info ->
+                try {
+                    val app = pm.getApplicationLabel(pm.getApplicationInfo(info.provider.packageName, 0)).toString()
+                    val icon = (info.loadIcon(act, dpi) ?: pm.getApplicationIcon(info.provider.packageName))
+                        .toBitmap(96, 96).asImageBitmap()
+                    WidgetChoice(info.provider, info.loadLabel(pm) ?: app, app, icon)
+                } catch (_: Exception) {
+                    null
+                }
+            }.sortedWith(compareBy({ it.app.lowercase() }, { it.label.lowercase() }))
+        }
+    }
+    Sheet("Wybierz widżet", onClose) {
+        when {
+            list == null -> Text("Wczytywanie…", color = Dim, fontSize = s(22))
+            list!!.isEmpty() -> Text("Żadna aplikacja nie ma widżetów", color = Dim, fontSize = s(22))
+            else -> LazyVerticalGrid(
+                GridCells.Adaptive(d(260)),
+                verticalArrangement = Arrangement.spacedBy(d(14)),
+                horizontalArrangement = Arrangement.spacedBy(d(14)),
+            ) {
+                items(list!!, key = { it.provider.flattenToString() }) { w ->
+                    Column(
+                        Modifier.kokpitSurface(d(20))
+                            .combinedClickable(onClick = { onPick(w.provider) }).padding(vertical = d(20), horizontal = d(12)),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        if (w.icon != null) Image(w.icon, w.label, Modifier.size(d(80)))
+                        Spacer(Modifier.height(d(10)))
+                        Text(w.label, color = Txt, fontSize = s(20), maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                        Text(w.app, color = Dim, fontSize = s(17), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        }
+    }
+}

@@ -55,6 +55,11 @@ object Prefs {
         get() = sp.getInt("camera_widget", -1)
         set(v) = sp.edit().putInt("camera_widget", v).apply()
 
+    /** widżet dowolnej aplikacji w klocku „Widżet” */
+    var blockWidgetId: Int
+        get() = sp.getInt("block_widget", -1)
+        set(v) = sp.edit().putInt("block_widget", v).apply()
+
     var layout: String?
         get() = sp.getString("layout", null)
         set(v) = sp.edit().putString("layout", v).apply()
@@ -70,6 +75,21 @@ object Prefs {
         set(v) = sp.edit().putString("car_model", v).apply()
 
     /** Model 3D zamiast zdjęcia auta; domyślnie zdjęcie 2D (3D na radiu nie jest płynne). */
+    /** ostatnio otwarta grupa w Ustawieniach */
+    var settingsGroup: Int
+        get() = sp.getInt("settings_group", 0)
+        set(v) = sp.edit().putInt("settings_group", v).apply()
+
+    /** wygląd Kokpitu (Themes.kt) */
+    var theme: String
+        get() = sp.getString("theme", "flat") ?: "flat"
+        set(v) = sp.edit().putString("theme", v).apply()
+
+    /** Ostrzeżenie „Zapnij pasy” z CAN; domyślnie wyłączone, bo sygnał obejmuje też puste fotele. */
+    var beltWarn: Boolean
+        get() = sp.getBoolean("belt_warn", false)
+        set(v) = sp.edit().putBoolean("belt_warn", v).apply()
+
     var show3d: Boolean
         get() = sp.getBoolean("show_3d", false)
         set(v) = sp.edit().putBoolean("show_3d", v).apply()

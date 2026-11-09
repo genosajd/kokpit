@@ -5,8 +5,10 @@ Kotlin + Jetpack Compose, ekran 2560x720.
 
 ## Co potrafi
 
-- Bloki na siatce 8x2, które można przestawiać, powiększać i chować: skróty aplikacji, auto, nawigacja, kamera, pogoda.
-- **Dane z auta przez moduł CAN radia:** paliwo w litrach, otwarte drzwi i klapa (widok z góry), bieg, ostrzeżenie o niezapiętym pasie, temperatura zewnętrzna, prędkość (awaryjnie z GPS).
+- Bloki na siatce 8x2, które można przestawiać, powiększać i chować: skróty aplikacji, auto, nawigacja, kamera, pogoda i dowolny widżet Androida.
+- Skróty przestawia się przytrzymaniem i przeciągnięciem; obsługa pokrętłem iDrive z wyraźnym zaznaczeniem.
+- Wygląd do wyboru w Ustawieniach: Płaski, BMW iDrive, M Sport, Animowany. Nowy wygląd to jeden wpis w `Themes.kt`.
+- **Dane z auta przez moduł CAN radia:** paliwo w litrach, otwarte drzwi i klapa (widok z góry), bieg, ostrzeżenie o niezapiętym pasie (domyślnie wyłączone), temperatura zewnętrzna, prędkość (awaryjnie z GPS).
 - Zdjęcie auta albo model 3D obracany palcem (Filament).
 - Trasa z powiadomień Map Google i Waze; przyciski Dom i Praca otwierają miejsca zapisane w Mapach.
 - Podgląd kamery Xiaomi na żywo (RTSP z aplikacji Xiaomi Cam z serwerem w tle).

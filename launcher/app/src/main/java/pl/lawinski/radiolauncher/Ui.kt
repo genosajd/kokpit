@@ -54,6 +54,7 @@ import androidx.compose.material.icons.outlined.VerticalSplit
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.outlined.WbCloudy
 import androidx.compose.material.icons.outlined.WbSunny
+import androidx.compose.material.icons.outlined.Widgets
 import androidx.compose.material.icons.outlined.Work
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -72,8 +73,10 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -87,6 +90,33 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.foundation.gestures.drag
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.foundation.layout.offset
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.composed
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -117,6 +147,7 @@ sealed interface Dlg {
     data class Menu(val index: Int) : Dlg
     data class Address(val work: Boolean) : Dlg
     data object Cameras : Dlg
+    data object Widgets : Dlg
 }
 
 /** Edycja układu tylko na postoju: powyżej tej prędkości z GPS przycisk jest nieaktywny. */
@@ -157,12 +188,16 @@ fun LauncherScreen(act: MainActivity) {
         shortcuts = list
     }
 
+    val theme = themeState.value
+    val animate = theme.animated && act.visible.value && !edit
     MaterialTheme(colorScheme = darkColorScheme(primary = Accent, surface = CardBg, background = Bg)) {
+      CompositionLocalProvider(LocalTheme provides theme, LocalAnimate provides animate) {
         BoxWithConstraints(
-            Modifier.fillMaxSize().background(Bg)
+            Modifier.fillMaxSize().background(theme.screen)
                 .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.displayCutout))
         ) {
             val u = minOf(maxWidth / 2560f, maxHeight / 720f)
+            if (animate) Aurora()
             CompositionLocalProvider(LocalU provides u) {
                 Column(Modifier.fillMaxSize().padding(horizontal = d(28))) {
                     if (edit) {
@@ -184,11 +219,17 @@ fun LauncherScreen(act: MainActivity) {
                                 BlockId.SHORTCUTS -> ShortcutsBlock(m, slot, apps, shortcuts,
                                     onAdd = { dialog = Dlg.Picker("Dodaj skrót") { key -> saveShortcuts(shortcuts + key) } },
                                     onMenu = { dialog = Dlg.Menu(it) },
+                                    onMove = { from, to ->
+                                        val l = shortcuts.toMutableList()
+                                        l.add(to, l.removeAt(from))
+                                        saveShortcuts(l)
+                                    },
                                     onDrawer = { dialog = Dlg.Picker("Aplikacje", drawer = true) { Apps.launch(act, it) } })
                                 BlockId.CAR -> CarBlock(m, act, apps, edit, onSplitSettings = { dialog = Dlg.Settings })
                                 BlockId.NAV -> NavBlock(m, slot, act, onAddress = { dialog = Dlg.Address(it) })
                                 BlockId.CAMERA -> CameraBlock(m, act, onChoose = { dialog = Dlg.Cameras })
                                 BlockId.WEATHER -> WeatherBlock(m, slot, act)
+                                BlockId.WIDGET -> WidgetBlock(m, act, onChoose = { dialog = Dlg.Widgets })
                             }
                         }
                     }
@@ -201,6 +242,7 @@ fun LauncherScreen(act: MainActivity) {
                         onPicker = { dialog = it },
                         onAddress = { dialog = Dlg.Address(it) },
                         onCameras = { dialog = Dlg.Cameras },
+                        onWidgets = { dialog = Dlg.Widgets },
                         onEditLayout = { dialog = null; edit = true },
                         onDemo = { demo = it },
                         onResetShortcuts = { saveShortcuts(Apps.defaultShortcuts(apps)) })
@@ -209,21 +251,11 @@ fun LauncherScreen(act: MainActivity) {
                         dl.onPick(key)
                     }
                     is Dlg.Menu -> ShortcutMenuDialog(
-                        index = dl.index, count = shortcuts.size,
                         onClose = { dialog = null },
                         onReplace = {
                             dialog = Dlg.Picker("Zamień skrót") { key ->
                                 saveShortcuts(shortcuts.toMutableList().also { it[dl.index] = key })
                             }
-                        },
-                        onMove = { delta ->
-                            val l = shortcuts.toMutableList()
-                            val j = dl.index + delta
-                            if (j in l.indices) {
-                                l[dl.index] = l[j].also { l[j] = l[dl.index] }
-                                saveShortcuts(l)
-                            }
-                            dialog = null
                         },
                         onRemove = {
                             saveShortcuts(shortcuts.toMutableList().also { it.removeAt(dl.index) })
@@ -232,21 +264,42 @@ fun LauncherScreen(act: MainActivity) {
                     )
                     is Dlg.Address -> AddressDialog(dl.work, onClose = { dialog = null })
                     is Dlg.Cameras -> CameraPickerDialog(act, onClose = { dialog = null })
+                    is Dlg.Widgets -> WidgetPickerDialog(act, onClose = { dialog = null }) { provider ->
+                        dialog = null
+                        act.addBlockWidget(provider)
+                    }
                 }
             }
         }
+      }
     }
 }
 
 @Composable
 fun Block(modifier: Modifier, content: @Composable () -> Unit) {
+    val animate = LocalAnimate.current
+    // wygląd animowany: bloki wjeżdżają od dołu przy każdym powrocie na ekran główny
+    val appear = remember { androidx.compose.animation.core.Animatable(1f) }
+    val delay = remember { (blockEntrance++ % 6) * 80 }
+    LaunchedEffect(animate) {
+        if (animate) {
+            appear.snapTo(0f)
+            appear.animateTo(1f, androidx.compose.animation.core.tween(700, delayMillis = delay, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+        } else appear.snapTo(1f)
+    }
     Box(
         modifier
+            .graphicsLayer { translationY = (1f - appear.value) * 40f; alpha = 0.35f + 0.65f * appear.value }
             .clip(RoundedCornerShape(d(28)))
-            .background(CardBg)
-            .border(1.dp, Line, RoundedCornerShape(d(28)))
-    ) { content() }
+            .background(LocalTheme.current.block)
+            .border(1.dp, LocalTheme.current.blockEdge, RoundedCornerShape(d(28)))
+    ) {
+        content()
+        if (animate) BlockSweep()
+    }
 }
+
+private var blockEntrance = 0
 
 @Composable
 fun Label(icon: ImageVector, text: String) {
@@ -257,10 +310,52 @@ fun Label(icon: ImageVector, text: String) {
     }
 }
 
+private val OK_KEYS = setOf(Key.Enter, Key.NumPadEnter, Key.DirectionCenter)
+
+/**
+ * Tło kafelka, przycisku lub wiersza w bieżącym wyglądzie (Themes.kt) razem z wyraźnym
+ * zaznaczeniem elementu wybranego pokrętłem iDrive: kolor wyboru, gruba ramka, lekkie powiększenie.
+ * Musi stać w łańcuchu przed clickable/focusable, żeby widzieć jego fokus.
+ * fill = false: bez tła (np. kafelek „Dodaj”), active = element włączony (np. „3D”).
+ */
+fun Modifier.kokpitSurface(radius: Dp, fill: Boolean = true, active: Boolean = false): Modifier = composed {
+    val t = LocalTheme.current
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(radius)
+    val ring = d(3)
+    val pulse = if (focused && LocalAnimate.current) loop(1600) else null
+    this
+        .onFocusChanged { focused = it.isFocused || it.hasFocus }
+        .then(
+            if (focused && t.selectedGrow) Modifier.graphicsLayer {
+                // delikatne powiększenie; w wyglądzie animowanym lekko „oddycha”
+                val sc = 1.03f + 0.015f * (pulse?.value ?: 0f)
+                scaleX = sc; scaleY = sc
+            } else Modifier
+        )
+        .clip(shape)
+        .then(
+            when {
+                // wybór: przezroczysty kolor wyboru na zwykłym tle elementu
+                focused -> Modifier.background(if (fill) t.surface else SolidColor(Color.Transparent)).background(t.selected)
+                active -> Modifier.background(t.active)
+                fill -> Modifier.background(t.surface)
+                else -> Modifier
+            }
+        )
+        .then(
+            when {
+                focused -> Modifier.border(ring, t.selectedRing, shape)
+                fill && !active && t.surfaceEdge != null -> Modifier.border(1.dp, t.surfaceEdge, shape)
+                else -> Modifier
+            }
+        )
+}
+
 @Composable
-fun Pill(icon: ImageVector?, text: String, color: Color = Txt, bg: Color = CardHi, onClick: () -> Unit) {
+fun Pill(icon: ImageVector?, text: String, color: Color = Txt, active: Boolean = false, onClick: () -> Unit) {
     Row(
-        Modifier.clip(RoundedCornerShape(d(14))).background(bg)
+        Modifier.kokpitSurface(d(14), active = active)
             .combinedClickable(onClick = onClick)
             .padding(horizontal = d(20), vertical = d(8)),
         verticalAlignment = Alignment.CenterVertically,
@@ -323,13 +418,27 @@ fun EditBar(slots: List<Slot>, onAdd: (BlockId) -> Unit, onReset: () -> Unit, on
         Spacer(Modifier.weight(1f))
         Pill(null, "Przywróć układ", onClick = onReset)
         Spacer(Modifier.width(d(14)))
-        Pill(null, "Gotowe", color = Color(0xFF031426), bg = Accent, onClick = onDone)
+        Pill(null, "Gotowe", color = LocalTheme.current.activeText, active = true, onClick = onDone)
     }
 }
 
 // ---------- skróty ----------
 
 private const val ADD_TILE = "+"
+
+/** Stan przeciągania skrótu: współrzędne w układzie całego okna (root). */
+private class ShortcutDrag {
+    var from by mutableIntStateOf(-1)
+    var target by mutableIntStateOf(-1)
+    var finger by mutableStateOf(Offset.Zero)
+    var grab = Offset.Zero
+    var size = Size.Zero
+    var moved = false
+    val rects = HashMap<Int, Rect>()
+    var pager = Rect.Zero
+}
+
+private const val DRAG_SLOP_PX = 24f
 
 @Composable
 fun ShortcutsBlock(
@@ -339,18 +448,102 @@ fun ShortcutsBlock(
     shortcuts: List<String>,
     onAdd: () -> Unit,
     onMenu: (Int) -> Unit,
+    onMove: (from: Int, to: Int) -> Unit,
     onDrawer: () -> Unit,
 ) {
     val ctx = LocalContext.current
+    val density = LocalDensity.current
+    val haptic = LocalHapticFeedback.current
     // niski klocek: jeden rząd szerszych ikon; wysoki: trzy rzędy, półtorej kolumny ikon na komórkę siatki
     val rows = if (slot.h == 1) 1 else 3
     val cols = if (slot.h == 1) slot.w * 2 else (slot.w * 3 / 2).coerceAtLeast(1)
     val perPage = rows * cols
     val pages = (shortcuts + ADD_TILE).chunked(perPage)
     val pager = rememberPagerState { pages.size }
-    Block(modifier) {
+    val drag = remember { ShortcutDrag() }
+    val dragging = drag.from >= 0
+    val count = shortcuts.size
+    val menu by rememberUpdatedState(onMenu)
+    val move by rememberUpdatedState(onMove)
+    var blockOrigin by remember { mutableStateOf(Offset.Zero) }
+
+    fun updateTarget() {
+        val f = drag.finger
+        drag.rects.entries.firstOrNull { (i, r) -> i <= count && r.width > 0f && r.contains(f) }
+            ?.let { drag.target = it.key.coerceAtMost(count - 1) }
+    }
+
+    // palec przy lewej/prawej krawędzi bloku: po chwili przełącz stronę
+    val edgeDir = when {
+        !dragging || pages.size < 2 -> 0
+        drag.finger.x < drag.pager.left + drag.pager.width * 0.08f && pager.currentPage > 0 -> -1
+        drag.finger.x > drag.pager.right - drag.pager.width * 0.08f && pager.currentPage < pages.size - 1 -> 1
+        else -> 0
+    }
+    LaunchedEffect(edgeDir) {
+        while (edgeDir != 0) {
+            delay(650)
+            val next = (pager.currentPage + edgeDir).coerceIn(0, pages.size - 1)
+            pager.animateScrollToPage(next)
+            updateTarget()
+        }
+    }
+
+    fun endDrag(commit: Boolean) {
+        val from = drag.from
+        val to = drag.target
+        val moved = drag.moved
+        drag.from = -1
+        drag.target = -1
+        if (!commit || from < 0) return
+        if (!moved) menu(from) else if (to in 0 until count && to != from) move(from, to)
+    }
+
+    // jeden detektor na kafelek: dotknięcie = uruchom, przytrzymanie = menu, przytrzymanie + ruch = przesuń
+    fun Modifier.draggableTile(index: Int, key: String, onTap: () -> Unit): Modifier = this
+        .onGloballyPositioned { drag.rects[index] = it.boundsInRoot() }
+        .graphicsLayer { alpha = if (drag.from == index) 0f else 1f }
+        .pointerInput(index, count, key) {
+            awaitEachGesture {
+                val down = awaitFirstDown()
+                val long = awaitLongPressOrCancellation(down.id)
+                if (long == null) {
+                    val up = currentEvent.changes.firstOrNull { it.id == down.id }
+                    if (up != null && !up.pressed && !up.isConsumed) {
+                        up.consume()
+                        onTap()
+                    }
+                    return@awaitEachGesture
+                }
+                val r = drag.rects[index] ?: return@awaitEachGesture
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                long.consume()
+                drag.grab = long.position
+                drag.size = r.size
+                drag.finger = r.topLeft + long.position
+                drag.moved = false
+                drag.target = index
+                drag.from = index
+                val start = drag.finger
+                val ok = drag(long.id) { change ->
+                    drag.finger += change.positionChange()
+                    change.consume()
+                    if (!drag.moved && (drag.finger - start).getDistance() > DRAG_SLOP_PX) drag.moved = true
+                    updateTarget()
+                }
+                endDrag(ok)
+            }
+        }
+
+    Block(modifier.onGloballyPositioned { blockOrigin = it.boundsInRoot().topLeft }) {
         Column(Modifier.fillMaxSize().padding(vertical = d(22))) {
-            HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth()) { p ->
+            HorizontalPager(
+                pager,
+                Modifier.weight(1f).fillMaxWidth().onGloballyPositioned { drag.pager = it.boundsInRoot() },
+                userScrollEnabled = !dragging,
+                // wszystkie strony zostają w kompozycji, żeby gest przeciągania przetrwał zmianę strony
+                beyondViewportPageCount = pages.size,
+            ) { p ->
                 val items = pages[p]
                 Column(Modifier.fillMaxSize().padding(horizontal = d(22)), verticalArrangement = Arrangement.spacedBy(d(16))) {
                     for (row in 0 until rows) {
@@ -359,16 +552,20 @@ fun ShortcutsBlock(
                                 val i = row * cols + col
                                 val key = items.getOrNull(i)
                                 val index = p * perPage + i
+                                val hl = dragging && drag.target == index && drag.from != index
                                 Box(Modifier.weight(1f).fillMaxHeight()) {
                                     when (key) {
                                         null -> {}
-                                        ADD_TILE -> Tile(null, Icons.Outlined.Add, "Dodaj", dashed = true, onClick = onAdd)
-                                        APPS_DRAWER -> Tile(null, Icons.Outlined.Apps, "Aplikacje", onClick = onDrawer, onLong = { onMenu(index) })
+                                        ADD_TILE -> Tile(null, Icons.Outlined.Add, "Dodaj", dashed = true,
+                                            modifier = Modifier.onGloballyPositioned { drag.rects[index] = it.boundsInRoot() },
+                                            onClick = onAdd)
+                                        APPS_DRAWER -> Tile(null, Icons.Outlined.Apps, "Aplikacje", highlight = hl,
+                                            gestures = Modifier.draggableTile(index, key, onDrawer), onClick = onDrawer)
                                         else -> {
                                             val app = Apps.find(apps, key)
-                                            Tile(app?.icon, Icons.Outlined.Apps, app?.label ?: "Brak aplikacji",
-                                                onClick = { if (!Apps.launch(ctx, key)) onMenu(index) },
-                                                onLong = { onMenu(index) })
+                                            Tile(app?.icon, Icons.Outlined.Apps, app?.label ?: "Brak aplikacji", highlight = hl,
+                                                gestures = Modifier.draggableTile(index, key) { if (!Apps.launch(ctx, key)) onMenu(index) },
+                                                onClick = { if (!Apps.launch(ctx, key)) onMenu(index) })
                                         }
                                     }
                                 }
@@ -391,6 +588,25 @@ fun ShortcutsBlock(
                 }
             }
         }
+        // przeciągana ikona pod palcem
+        if (dragging) {
+            val key = shortcuts.getOrNull(drag.from)
+            val pos = drag.finger - drag.grab - blockOrigin
+            with(density) {
+                Box(
+                    Modifier
+                        .offset { IntOffset(pos.x.roundToInt(), pos.y.roundToInt()) }
+                        .size(drag.size.width.toDp(), drag.size.height.toDp())
+                        .graphicsLayer { scaleX = 1.08f; scaleY = 1.08f; alpha = 0.92f }
+                ) {
+                    if (key == APPS_DRAWER) Tile(null, Icons.Outlined.Apps, "Aplikacje", onClick = {})
+                    else if (key != null) {
+                        val app = Apps.find(apps, key)
+                        Tile(app?.icon, Icons.Outlined.Apps, app?.label ?: "Brak aplikacji", onClick = {})
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -400,15 +616,30 @@ fun Tile(
     fallback: ImageVector,
     label: String,
     dashed: Boolean = false,
-    onClick: () -> Unit,
+    highlight: Boolean = false,
+    modifier: Modifier = Modifier,
+    /** własna obsługa dotyku zamiast kliknięcia (przeciąganie skrótów) */
+    gestures: Modifier? = null,
+    onClick: () -> Unit = {},
     onLong: (() -> Unit)? = null,
 ) {
     Column(
-        Modifier.fillMaxSize()
-            .clip(RoundedCornerShape(d(20)))
-            .background(if (dashed) Color.Transparent else CardHi)
-            .then(if (dashed) Modifier.border(2.dp, Color(0x26FFFFFF), RoundedCornerShape(d(20))) else Modifier)
-            .combinedClickable(onClick = onClick, onLongClick = onLong),
+        modifier.fillMaxSize()
+            .kokpitSurface(d(20), fill = !dashed)
+            .then(
+                when {
+                    highlight -> Modifier.border(3.dp, Accent, RoundedCornerShape(d(20)))
+                    dashed -> Modifier.border(2.dp, Color(0x26FFFFFF), RoundedCornerShape(d(20)))
+                    else -> Modifier
+                }
+            )
+            .then(
+                if (gestures != null) gestures.onKeyEvent { e ->
+                    // pokrętło iDrive / przycisk OK: uruchom jak dotknięciem
+                    if (e.type == KeyEventType.KeyUp && e.key in OK_KEYS) { onClick(); true } else false
+                }.focusable()
+                else Modifier.combinedClickable(onClick = onClick, onLongClick = onLong)
+            ),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -440,7 +671,9 @@ fun CarBlock(modifier: Modifier, act: MainActivity, apps: List<AppEntry>, edit: 
         }
     }
     Block(modifier) {
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(CardBg, Color(0xFF0B0F15))))) {
+        val theme = LocalTheme.current
+        Box(Modifier.fillMaxSize().background(theme.carBack)) {
+            if (LocalAnimate.current) CarGlow(theme.glow)
             when {
                 car.open.isNotEmpty() -> Row(Modifier.fillMaxSize().padding(vertical = d(24)), verticalAlignment = Alignment.CenterVertically) {
                     Spacer(Modifier.weight(1f))
@@ -462,7 +695,12 @@ fun CarBlock(modifier: Modifier, act: MainActivity, apps: List<AppEntry>, edit: 
             }
 
             Row(Modifier.padding(start = d(34), top = d(30)), verticalAlignment = Alignment.Bottom) {
-                Text(speed?.toString() ?: "—", color = Txt, fontSize = s(96), fontWeight = FontWeight.Light)
+                // wygląd animowany: prędkość dochodzi płynnie do nowej wartości
+                val shown by androidx.compose.animation.core.animateIntAsState(speed ?: 0, label = "speed")
+                Text(
+                    if (speed == null) "—" else (if (LocalAnimate.current) shown else speed).toString(), color = Txt, fontSize = s(96), fontWeight = FontWeight.Light,
+                    style = theme.speed?.let { androidx.compose.ui.text.TextStyle(brush = it) } ?: androidx.compose.ui.text.TextStyle.Default,
+                )
                 Spacer(Modifier.width(d(10)))
                 Text("km/h", color = Dim, fontSize = s(24), modifier = Modifier.padding(bottom = d(16)))
                 car.gear?.let { g ->
@@ -475,7 +713,8 @@ fun CarBlock(modifier: Modifier, act: MainActivity, apps: List<AppEntry>, edit: 
                     )
                 }
             }
-            if (car.beltWarn) {
+            // tylko w czasie jazdy i gdy włączone w Ustawieniach
+            if (car.beltWarn && beltOn.value && (speed ?: 0) >= 10) {
                 Row(
                     Modifier.padding(start = d(34), top = d(150)).clip(RoundedCornerShape(d(14))).background(Color(0x33FF5252))
                         .padding(horizontal = d(16), vertical = d(8)),
@@ -496,31 +735,32 @@ fun CarBlock(modifier: Modifier, act: MainActivity, apps: List<AppEntry>, edit: 
                         car.rangeKm?.let { Text("  · ${it} km", color = Dim, fontSize = s(22)) }
                     }
                     Box(Modifier.padding(top = d(10)).fillMaxWidth().height(d(8)).clip(RoundedCornerShape(d(8))).background(Color(0x14FFFFFF))) {
-                        Box(Modifier.fillMaxWidth((fuel / CarData.TANK_L).coerceIn(0f, 1f)).fillMaxHeight().background(if (fuel < 10) Warn else Accent))
+                        Box(Modifier.fillMaxWidth((fuel / CarData.TANK_L).coerceIn(0f, 1f)).fillMaxHeight().clipToBounds().background(if (fuel < 10) SolidColor(Warn) else theme.fuel)) {
+                            if (LocalAnimate.current) Shimmer()
+                        }
                     }
                 }
             }
 
             Row(Modifier.align(Alignment.BottomEnd).padding(d(26)), verticalAlignment = Alignment.CenterVertically) {
                 Box(
-                    Modifier.clip(RoundedCornerShape(d(18))).background(CardHi)
+                    Modifier.kokpitSurface(d(18))
                         .combinedClickable(onClick = { openCarScreen(act) })
                         .padding(horizontal = d(16), vertical = d(14)),
                 ) { Text("iDrive", color = Txt, fontSize = s(24), fontWeight = FontWeight.Bold) }
                 Spacer(Modifier.width(d(14)))
                 if (model.isNotBlank() && car.open.isEmpty()) {
                     Box(
-                        Modifier.clip(RoundedCornerShape(d(18))).background(if (show3d) Accent else CardHi)
+                        Modifier.kokpitSurface(d(18), active = show3d)
                             .combinedClickable(onClick = { show3d = !show3d; Prefs.show3d = show3d })
                             .padding(d(14)),
-                    ) { Text("3D", color = if (show3d) Color(0xFF031426) else Txt, fontSize = s(26), fontWeight = FontWeight.Bold) }
+                    ) { Text("3D", color = if (show3d) theme.activeText else Txt, fontSize = s(26), fontWeight = FontWeight.Bold) }
                     Spacer(Modifier.width(d(14)))
                 }
                 val left = Apps.find(apps, Prefs.splitLeft)
                 val right = Apps.find(apps, Prefs.splitRight)
                 Row(
-                    Modifier.clip(RoundedCornerShape(d(18))).background(CardHi)
-                        .border(1.dp, Line, RoundedCornerShape(d(18)))
+                    Modifier.kokpitSurface(d(18))
                         .combinedClickable(
                             onClick = { openSplit(act, Prefs.splitLeft, Prefs.splitRight) },
                             onLongClick = onSplitSettings,
@@ -566,7 +806,10 @@ fun NavBlock(modifier: Modifier, slot: Slot, act: MainActivity, onAddress: (Bool
                 ) {
                     Column {
                         if (n.icon != null) {
-                            Box(Modifier.size(d(if (compact) 64 else 84)).clip(RoundedCornerShape(d(20))).background(CardHi), contentAlignment = Alignment.Center) {
+                            val nudge = if (LocalAnimate.current) loop(1400) else null
+                            val nudgePx = with(LocalDensity.current) { d(8).toPx() }
+                            Box(Modifier.size(d(if (compact) 64 else 84)).graphicsLayer { translationX = (nudge?.value ?: 0f) * nudgePx }
+                                .clip(RoundedCornerShape(d(20))).background(CardHi), contentAlignment = Alignment.Center) {
                                 Image(n.icon.asImageBitmap(), null, Modifier.size(d(if (compact) 48 else 64)))
                             }
                             Spacer(Modifier.height(d(14)))
@@ -606,7 +849,7 @@ fun NavBlock(modifier: Modifier, slot: Slot, act: MainActivity, onAddress: (Bool
 @Composable
 fun DestButton(icon: ImageVector, name: String, address: String, work: Boolean, act: MainActivity, modifier: Modifier = Modifier.fillMaxWidth(), onEdit: () -> Unit) {
     Row(
-        modifier.clip(RoundedCornerShape(d(18))).background(CardHi)
+        modifier.kokpitSurface(d(18))
             .combinedClickable(
                 // bez własnego adresu: Dom/Praca zapisane w Mapach Google; przytrzymanie = własny adres
                 onClick = {
@@ -646,10 +889,11 @@ fun CameraBlock(modifier: Modifier, act: MainActivity, onChoose: () -> Unit) {
                 Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x8C000000), Color.Transparent, Color.Transparent, Color(0x99000000)))))
                 Row(Modifier.fillMaxWidth().padding(horizontal = d(24), vertical = d(18)), verticalAlignment = Alignment.CenterVertically) {
                     Text(live, color = Txt, fontSize = s(24), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    val blink = if (playing && LocalAnimate.current) loop(900) else null
                     Text(
                         if (playing) "● NA ŻYWO" else "łączenie…",
                         color = if (playing) Color(0xFFFF4D5E) else Dim, fontSize = s(18), fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.clip(RoundedCornerShape(d(10))).background(Color(0x73000000)).padding(horizontal = d(12), vertical = d(6)),
+                        modifier = Modifier.graphicsLayer { alpha = 1f - 0.55f * (blink?.value ?: 0f) }.clip(RoundedCornerShape(d(10))).background(Color(0x73000000)).padding(horizontal = d(12), vertical = d(6)),
                     )
                 }
                 if (!playing) {
@@ -674,7 +918,7 @@ fun CameraBlock(modifier: Modifier, act: MainActivity, onChoose: () -> Unit) {
                     }
                 }
             }
-            id != -1 && act.widgetManager.getAppWidgetInfo(id) != null -> CameraWidget(act, id)
+            id != -1 && act.widgetManager.getAppWidgetInfo(id) != null -> HostedWidget(act, id)
             else -> Column(
                 Modifier.fillMaxSize().combinedClickable(onClick = onChoose),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -689,8 +933,33 @@ fun CameraBlock(modifier: Modifier, act: MainActivity, onChoose: () -> Unit) {
     }
 }
 
+// ---------- widżet dowolnej aplikacji ----------
+
 @Composable
-fun CameraWidget(act: MainActivity, id: Int) {
+fun WidgetBlock(modifier: Modifier, act: MainActivity, onChoose: () -> Unit) {
+    val id = act.blockWidgetId.intValue
+    val ok = id != -1 && remember(id) { act.widgetManager.getAppWidgetInfo(id) } != null
+    Block(modifier) {
+        if (ok) {
+            // zmiana i usunięcie widżetu: Ustawienia → „Widżet: zmień / usuń”
+            HostedWidget(act, id)
+        } else {
+            Column(
+                Modifier.fillMaxSize().combinedClickable(onClick = onChoose),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Icon(Icons.Outlined.Widgets, null, tint = Accent, modifier = Modifier.size(d(64)))
+                Spacer(Modifier.height(d(14)))
+                Text("Dodaj widżet", color = Txt, fontSize = s(26))
+                Text("dowolnej zainstalowanej aplikacji", color = Dim, fontSize = s(20), textAlign = TextAlign.Center)
+            }
+        }
+    }
+}
+
+@Composable
+fun HostedWidget(act: MainActivity, id: Int) {
     val info = remember(id) { act.widgetManager.getAppWidgetInfo(id) } ?: return
     androidx.compose.runtime.key(id) {
         AndroidView(
@@ -714,6 +983,9 @@ fun CameraWidget(act: MainActivity, id: Int) {
 }
 
 // ---------- pogoda ----------
+
+/** Przełącznik ostrzeżenia o pasach (Ustawienia); stan Compose, żeby blok auta reagował od razu. */
+val beltOn by lazy { mutableStateOf(Prefs.beltWarn) }
 
 object WeatherState {
     val current = kotlinx.coroutines.flow.MutableStateFlow<Weather?>(null)
