@@ -103,7 +103,9 @@ fun LiveCameraView(name: String, modifier: Modifier = Modifier, onProblem: (Stri
                 // dekoder radia (SM6125) przyjmuje najwyżej 1920x1088; strumień 2.5K go przerasta
                 val tooBig = error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
                     error.errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES ||
-                    error.errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED
+                    error.errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED ||
+                    // dekoder rusza, ale pada na pierwszej klatce (tak było z 2560x1440 HEVC)
+                    ((error as? androidx.media3.exoplayer.ExoPlaybackException)?.rendererFormat?.let { it.width > 1920 || it.height > 1088 } == true)
                 onProblem(if (tooBig) "Radio nie odtworzy obrazu 2.5K – w Xiaomi Cam wybierz 720p" else null)
                 failed = true
                 onState(false)

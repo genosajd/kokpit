@@ -45,18 +45,24 @@ import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.GraphicEq
+import androidx.compose.material.icons.outlined.SmartToy
+import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.VerticalSplit
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.outlined.ViewInAr
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material.icons.outlined.Widgets
 import androidx.compose.material.icons.outlined.Work
+import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -165,9 +171,11 @@ fun SettingsDialog(
     onClose: () -> Unit,
     onPicker: (Dlg.Picker) -> Unit,
     onAddress: (Boolean) -> Unit,
+    onPlace3: () -> Unit,
     onCameras: () -> Unit,
-    onWidgets: () -> Unit,
     onEditLayout: () -> Unit,
+    onAiField: (AiField) -> Unit,
+    onVoices: () -> Unit,
     onDemo: (Boolean) -> Unit,
     onResetShortcuts: () -> Unit,
 ) {
@@ -184,6 +192,9 @@ fun SettingsDialog(
     } catch (_: Exception) {
     }
     fun label(key: String) = Apps.find(apps, key)?.label ?: "nie wybrano"
+    var aiProvider by remember { mutableStateOf(Prefs.aiProvider) }
+    var aiSpeak by remember { mutableStateOf(Prefs.aiSpeak) }
+    val ttsEngine = Prefs.ttsEngine
     var group by remember { mutableStateOf(Prefs.settingsGroup.coerceIn(0, SETTINGS_GROUPS.size - 1)) }
 
     Sheet("Ustawienia", onClose, widthFraction = 0.94f) {
@@ -204,7 +215,7 @@ fun SettingsDialog(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("Kokpit F11 0.3.5", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
+                Text("Kokpit F11 0.3.6", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
             }
             Spacer(Modifier.width(d(26)))
             LazyVerticalGrid(
@@ -231,10 +242,6 @@ fun SettingsDialog(
                     2 -> {
                 item { SettingTile(Icons.Outlined.DashboardCustomize, "Edytuj układ bloków", "Przesuwanie, rozmiar, ukrywanie – tylko na postoju") { onEditLayout() } }
                 item { SettingTile(Icons.Outlined.RestartAlt, "Przywróć domyślne skróty", "Zastępuje obecne skróty") { onResetShortcuts(); onClose() } }
-                if (act.blockWidgetId.intValue != -1) {
-                    item { SettingTile(Icons.Outlined.Widgets, "Widżet: zmień", "Wybierz inny widżet do bloku „Widżet”") { onWidgets() } }
-                    item { SettingTile(Icons.Outlined.Delete, "Widżet: usuń", "Blok „Widżet” wróci do przycisku dodawania") { act.removeBlockWidget() } }
-                }
                     }
                     3 -> {
                 item {
@@ -244,6 +251,7 @@ fun SettingsDialog(
                 }
                 item { SettingTile(Icons.Outlined.Home, "Adres: Dom", Prefs.home.ifBlank { "z Map Google (zapisany Dom)" }) { onAddress(false) } }
                 item { SettingTile(Icons.Outlined.Work, "Adres: Praca", Prefs.work.ifBlank { "z Map Google (zapisana Praca)" }) { onAddress(true) } }
+                item { SettingTile(Icons.Outlined.Place, "Trzecie miejsce: " + Prefs.place3Name.ifBlank { "wyłączone" }, Prefs.place3Address.ifBlank { "etykieta wyszukana w Mapach Google" }) { onPlace3() } }
                     }
                     4 -> {
                 item {
@@ -274,6 +282,38 @@ fun SettingsDialog(
                 item { SettingTile(Icons.Outlined.DirectionsCar, "Model 3D: białe F11", "Wbudowany model, obracany palcem") { act.restoreCarModel() } }
                 if (model.isNotBlank()) item { SettingTile(Icons.Outlined.Delete, "Usuń model 3D", "Wróci zdjęcie auta") { act.removeCarModel() } }
                     }
+                    7 -> {
+                val claude = aiProvider == Assistant.ANTHROPIC
+                item {
+                    SettingTile(Icons.Outlined.SmartToy, "Dostawca: " + if (claude) "Anthropic (Claude)" else "OpenAI", "Dotknij, aby zmienić na " + if (claude) "OpenAI" else "Anthropic (Claude)") {
+                        aiProvider = if (claude) Assistant.OPENAI else Assistant.ANTHROPIC
+                        Prefs.aiProvider = aiProvider
+                        Assistant.reset()
+                    }
+                }
+                item {
+                    val key = if (claude) Prefs.anthropicKey else Prefs.openaiKey
+                    SettingTile(Icons.Outlined.Key, "Klucz API " + if (claude) "Anthropic" else "OpenAI",
+                        if (key.isBlank()) (if (claude) "Nie wpisano – console.anthropic.com" else "Nie wpisano – platform.openai.com") else "Wpisany: …" + key.takeLast(4),
+                        on = key.isNotBlank()) { onAiField(if (claude) AiField.ANTHROPIC_KEY else AiField.OPENAI_KEY) }
+                }
+                item {
+                    SettingTile(Icons.Outlined.Tune, "Model", if (claude) Prefs.anthropicModel else Prefs.openaiModel) {
+                        onAiField(if (claude) AiField.ANTHROPIC_MODEL else AiField.OPENAI_MODEL)
+                    }
+                }
+                item {
+                    SettingTile(Icons.Outlined.RecordVoiceOver, "Czytaj odpowiedzi na głos", if (aiSpeak) "Odpowiedzi czytane po polsku" else "Odpowiedzi tylko na ekranie", on = aiSpeak) {
+                        aiSpeak = !aiSpeak; Prefs.aiSpeak = aiSpeak
+                    }
+                }
+                item {
+                    val oa = ttsEngine == Speech.OPENAI
+                    SettingTile(Icons.Outlined.GraphicEq, "Głos: " + if (oa) "OpenAI (${Prefs.openaiVoice})" else "Google w radiu",
+                        if (oa) "Najbardziej ludzki; płatny, klucz OpenAI. Dotknij, aby wybrać" else "Dotknij, aby wybrać głos albo OpenAI") { onVoices() }
+                }
+                item { SettingTile(Icons.Outlined.RestartAlt, "Nowa rozmowa", "Asystent zapomni dotychczasową rozmowę") { Assistant.reset() } }
+                    }
                 }
             }
         }
@@ -289,6 +329,7 @@ private val SETTINGS_GROUPS = listOf(
         "Podzielony ekran" to Icons.Outlined.VerticalSplit,
         "Kamera" to Icons.Outlined.Videocam,
         "Auto" to Icons.Outlined.DirectionsCar,
+        "Asystent AI" to Icons.Outlined.SmartToy,
 )
 
 /** Kafelek ustawienia: ikona, tytuł, opis; `on` pokazuje stan przełącznika (Wł./Wył.). */
@@ -391,6 +432,145 @@ fun AddressDialog(work: Boolean, onClose: () -> Unit) {
     )
 }
 
+/** Wybór głosu odpowiedzi: polskie głosy systemowe (Google) albo głosy OpenAI, z odsłuchem. */
+@Composable
+fun VoicePickerDialog(act: MainActivity, onClose: () -> Unit) {
+    var engine by remember { mutableStateOf(Prefs.ttsEngine) }
+    var sysVoice by remember { mutableStateOf(Prefs.ttsVoice) }
+    var oaVoice by remember { mutableStateOf(Prefs.openaiVoice) }
+    var voices by remember { mutableStateOf<List<android.speech.tts.Voice>?>(null) }
+    LaunchedEffect(Unit) { Speech.polishVoices(act) { voices = it } }
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { Speech.stop() } }
+    Sheet("Głos odpowiedzi", { Speech.stop(); onClose() }) {
+        LazyVerticalGrid(
+            GridCells.Adaptive(d(380)),
+            verticalArrangement = Arrangement.spacedBy(d(14)),
+            horizontalArrangement = Arrangement.spacedBy(d(14)),
+        ) {
+            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                Text("Google w radiu – bezpłatnie; głosy „sieciowe” brzmią naturalniej, ale potrzebują internetu", color = Dim, fontSize = s(20))
+            }
+            val list = voices
+            if (list == null) item { Text("Wczytywanie…", color = Dim, fontSize = s(22)) }
+            else if (list.isEmpty()) item { Text("Brak polskich głosów – zainstaluj je w ustawieniach Androida (Zamiana tekstu na mowę)", color = Warn, fontSize = s(20)) }
+            else items(list.size) { i ->
+                val v = list[i]
+                val on = engine == Speech.SYSTEM && (sysVoice == v.name || (sysVoice.isBlank() && i == 0))
+                SettingTile(Icons.Outlined.RecordVoiceOver, "Głos ${i + 1}" + if (v.isNetworkConnectionRequired) " · sieciowy" else " · w radiu",
+                    v.name, on = on) {
+                    engine = Speech.SYSTEM; sysVoice = v.name
+                    Prefs.ttsEngine = Speech.SYSTEM; Speech.setSystemVoice(v.name)
+                    Speech.previewSystem(act, v)
+                }
+            }
+            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                Text(
+                    if (Prefs.openaiKey.isBlank()) "OpenAI – najbardziej ludzkie głosy; najpierw wpisz klucz API OpenAI (dostawcą rozmowy może zostać Claude)"
+                    else "OpenAI – najbardziej ludzkie głosy, płatne według długości tekstu (model ${Prefs.openaiTtsModel})",
+                    color = Dim, fontSize = s(20), modifier = Modifier.padding(top = d(10)),
+                )
+            }
+            items(Speech.OPENAI_VOICES.size) { i ->
+                val v = Speech.OPENAI_VOICES[i]
+                SettingTile(Icons.Outlined.GraphicEq, "OpenAI: $v", "Dotknij, aby odsłuchać i wybrać", on = engine == Speech.OPENAI && oaVoice == v) {
+                    if (Prefs.openaiKey.isBlank()) return@SettingTile
+                    engine = Speech.OPENAI; oaVoice = v
+                    Prefs.ttsEngine = Speech.OPENAI; Prefs.openaiVoice = v
+                    Speech.previewOpenAi(act, v)
+                }
+            }
+        }
+    }
+}
+
+/** Pola asystenta wpisywane w okienku. */
+enum class AiField(val title: String, val hint: String, val secret: Boolean) {
+    ANTHROPIC_KEY("Klucz API Anthropic", "sk-ant-…", true),
+    OPENAI_KEY("Klucz API OpenAI", "sk-…", true),
+    ANTHROPIC_MODEL("Model Claude", Assistant.DEFAULT_CLAUDE_MODEL, false),
+    OPENAI_MODEL("Model OpenAI", Assistant.DEFAULT_OPENAI_MODEL, false),
+}
+
+/** Wpisanie klucza API albo nazwy modelu asystenta; puste pole modelu = domyślny. */
+@Composable
+fun AiFieldDialog(field: AiField, onClose: () -> Unit) {
+    var text by remember {
+        mutableStateOf(
+            when (field) {
+                AiField.ANTHROPIC_KEY -> Prefs.anthropicKey
+                AiField.OPENAI_KEY -> Prefs.openaiKey
+                AiField.ANTHROPIC_MODEL -> Prefs.anthropicModel
+                AiField.OPENAI_MODEL -> Prefs.openaiModel
+            }
+        )
+    }
+    AlertDialog(
+        onDismissRequest = onClose,
+        containerColor = CardBg,
+        title = { Text(field.title, color = Txt) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(d(14))) {
+                OutlinedTextField(
+                    text, { text = it.trim() }, singleLine = true, placeholder = { Text(field.hint) },
+                    // bez podpowiedzi klawiatury: klucz nie trafi do słownika
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = if (field.secret) androidx.compose.ui.text.input.KeyboardType.Password else androidx.compose.ui.text.input.KeyboardType.Ascii,
+                        autoCorrectEnabled = false,
+                    ),
+                    visualTransformation = if (field.secret) androidx.compose.ui.text.input.PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
+                )
+                Text(
+                    if (field.secret) "Klucz zostaje tylko w radiu. Za zapytania płacisz u dostawcy według zużycia."
+                    else "Puste pole = model domyślny (${field.hint}).",
+                    color = Dim, fontSize = s(18),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                when (field) {
+                    AiField.ANTHROPIC_KEY -> Prefs.anthropicKey = text
+                    AiField.OPENAI_KEY -> Prefs.openaiKey = text
+                    AiField.ANTHROPIC_MODEL -> Prefs.anthropicModel = text
+                    AiField.OPENAI_MODEL -> Prefs.openaiModel = text
+                }
+                Assistant.reset()
+                onClose()
+            }) { Text("Zapisz") }
+        },
+        dismissButton = { TextButton(onClick = onClose) { Text("Anuluj") } },
+    )
+}
+
+/**
+ * Trzecie miejsce w bloku Nawigacja. Nazwa jest też etykietą szukaną w Mapach Google;
+ * adres (opcjonalny) daje od razu nawigację. Pusta nazwa chowa przycisk.
+ */
+@Composable
+fun Place3Dialog(onClose: () -> Unit) {
+    var name by remember { mutableStateOf(Prefs.place3Name) }
+    var address by remember { mutableStateOf(Prefs.place3Address) }
+    AlertDialog(
+        onDismissRequest = onClose,
+        containerColor = CardBg,
+        title = { Text("Trzecie miejsce", color = Txt) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(d(14))) {
+                OutlinedTextField(name, { name = it }, singleLine = true, label = { Text("Nazwa (etykieta w Mapach Google)") }, placeholder = { Text("Praca Gabi") })
+                OutlinedTextField(address, { address = it }, singleLine = true, label = { Text("Adres (opcjonalnie)") }, placeholder = { Text("puste = szukaj etykiety w Mapach") })
+                Text("Bez adresu Kokpit wyszuka nazwę w Mapach Google – etykieta z Twojego konta pojawi się jako wynik, wtedy „Trasa”. Pusta nazwa chowa przycisk.", color = Dim, fontSize = s(18))
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                Prefs.place3Name = name.trim()
+                Prefs.place3Address = address.trim()
+                onClose()
+            }) { Text("Zapisz") }
+        },
+        dismissButton = { TextButton(onClick = onClose) { Text("Anuluj") } },
+    )
+}
 
 /** Widżet do klocka „Widżet”: lista dostawców widżetów z zainstalowanych aplikacji. */
 private class WidgetChoice(val provider: android.content.ComponentName, val label: String, val app: String, val icon: androidx.compose.ui.graphics.ImageBitmap?)

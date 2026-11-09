@@ -16,7 +16,7 @@ import androidx.compose.ui.graphics.SolidColor
  *     `v(a, b, c)` to gradient pionowy od góry (a) do dołu (c), `solid(x)` to jeden kolor.
  *  3. Dopisz obiekt do listy `Themes.all`. Pojawi się w Ustawieniach z podglądem.
  * Kolory tekstu (Txt, Dim, Accent, Warn w Ui.kt) są wspólne dla wszystkich wyglądów.
- * Gradienty rysują się raz i nie animują się, więc nie obciążają radia.
+ * Gradienty rysują się raz. Ruch (animated = true, Anim.kt) kosztuje radio trochę mocy.
  */
 data class KokpitTheme(
     val id: String,
@@ -50,6 +50,10 @@ data class KokpitTheme(
     val animated: Boolean = false,
     /** kolor poświaty pod autem przy animacjach */
     val glow: Color = Color(0x384DA3FF),
+    /** dwie płynące poświaty w tle ekranu (górna, dolna) */
+    val aurora: Pair<Color, Color> = Color(0x524DA3FF) to Color(0x2E785AFF),
+    /** światło przesuwające się po górnej krawędzi bloków */
+    val sweep: Color = Color(0xE6A0D2FF),
 )
 
 private fun v(vararg c: Long) = Brush.verticalGradient(c.map { Color(it) })
@@ -74,11 +78,11 @@ object Themes {
         fuel = solid(0xFF4DA3FF),
     )
 
-    /** Gradienty jak w menu BMW NBT: grafit, chromowane krawędzie, niebieski BMW. */
+    /** Gradienty jak w menu BMW NBT: grafit, chromowane krawędzie, niebieski BMW, w ruchu. */
     val BMW_IDRIVE = KokpitTheme(
         id = "bmw",
         name = "BMW iDrive",
-        description = "Gradienty grafitu, chromowane krawędzie i niebieski BMW przy wyborze",
+        description = "Grafit i niebieski BMW w ruchu: płynąca poświata, światło na krawędziach, pulsujący wybór",
         screen = v(0xFF0F1A2C, 0xFF070B12, 0xFF030406),
         block = v(0xFF1F2A3A, 0xFF121923, 0xFF0A0E14),
         blockEdge = v(0x59BED2EB, 0x14788CAA, 0x2E7896BE),
@@ -91,13 +95,14 @@ object Themes {
         carBack = v(0x00000000, 0x00000000, 0x2E1C69D4),
         fuel = h(0xFFFF8A3D, 0xFFFFB547, 0xFFFFFFFF),
         speed = v(0xFFFFFFFF, 0xFFFFFFFF, 0xFF9FB3CC),
+        animated = true,
     )
 
-    /** Sportowy: czerń z czerwienią i paskami w barwach M. */
+    /** Sportowy: czerń z czerwienią i paskami w barwach M, w ruchu. */
     val M_SPORT = KokpitTheme(
         id = "msport",
         name = "M Sport",
-        description = "Grafit i czerń, wybór na czerwono, pasek paliwa w barwach M",
+        description = "Grafit i czerń z czerwienią w ruchu, pasek paliwa w barwach M",
         screen = v(0xFF16090B, 0xFF08080A, 0xFF030303),
         block = v(0xFF22252B, 0xFF15171B, 0xFF0C0D10),
         blockEdge = v(0x40FFFFFF, 0x0DFFFFFF, 0x26E0283C),
@@ -111,20 +116,16 @@ object Themes {
         carBack = v(0x00000000, 0x00000000, 0x26E0283C),
         fuel = h(0xFF5CC4F2, 0xFF1C3F94, 0xFFE0283C),
         speed = v(0xFFFFFFFF, 0xFFFFFFFF, 0xFFC9CDD4),
-    )
-
-    /** BMW iDrive w ruchu. Ruch kosztuje radio trochę mocy, dlatego to osobny wygląd. */
-    val ANIMATED = BMW_IDRIVE.copy(
-        id = "anim",
-        name = "Animowany",
-        description = "BMW iDrive w ruchu: płynąca poświata, światło na krawędziach, pulsujący wybór",
         animated = true,
+        aurora = Color(0x4DE0283C) to Color(0x2E1C3F94),
+        sweep = Color(0xE6FF8C96),
     )
 
     /** Wszystkie wyglądy do wyboru, w tej kolejności w Ustawieniach. */
-    val all = listOf(FLAT, BMW_IDRIVE, M_SPORT, ANIMATED)
+    val all = listOf(FLAT, BMW_IDRIVE, M_SPORT)
 
-    fun byId(id: String?) = all.firstOrNull { it.id == id } ?: FLAT
+    fun byId(id: String?) = all.firstOrNull { it.id == id }
+        ?: if (id == "anim") BMW_IDRIVE else FLAT // "anim" = dawny „Animowany” (0.3.5)
 }
 
 /** Bieżący wygląd; zmiana w Ustawieniach od razu przerysowuje ekran. */

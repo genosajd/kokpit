@@ -39,17 +39,22 @@ import androidx.compose.ui.unit.IntOffset
 import kotlin.math.roundToInt
 
 /** Klocki ekranu głównego z najmniejszym rozmiarem w komórkach siatki. */
-enum class BlockId(val title: String, val minW: Int, val minH: Int) {
+/** multi = klocek można dodać kilka razy (każdy egzemplarz ma własny numer [Slot.n]). */
+enum class BlockId(val title: String, val minW: Int, val minH: Int, val multi: Boolean = false) {
     SHORTCUTS("Skróty", 1, 1),
     CAR("Auto", 2, 1),
     NAV("Nawigacja", 1, 1),
     CAMERA("Kamera", 1, 1),
     WEATHER("Pogoda", 1, 1),
-    WIDGET("Widżet", 1, 1),
+    WIDGET("Widżet", 1, 1, multi = true),
+    ASSISTANT("Asystent", 1, 1),
 }
 
-/** Położenie klocka na siatce 8 × 2: kolumna, rząd, szerokość, wysokość. */
-data class Slot(val id: BlockId, val c: Int, val r: Int, val w: Int, val h: Int) {
+/** Położenie klocka na siatce 8 × 2: kolumna, rząd, szerokość, wysokość; n = numer egzemplarza. */
+data class Slot(val id: BlockId, val c: Int, val r: Int, val w: Int, val h: Int, val n: Int = 0) {
+    /** Unikalny klucz klocka, np. "NAV" albo "WIDGET#2" (zapisywany w układzie). */
+    val key get() = if (n == 0) id.name else "${id.name}#$n"
+    fun same(o: Slot) = id == o.id && n == o.n
     fun overlaps(o: Slot) = c < o.c + o.w && o.c < c + w && r < o.r + o.h && o.r < r + h
     val inBounds get() = c >= 0 && r >= 0 && w >= id.minW && h >= id.minH && c + w <= GRID_COLS && r + h <= GRID_ROWS
 }
@@ -70,18 +75,19 @@ object LayoutStore {
         if (s.isNullOrBlank()) return DEFAULT
         return try {
             s.split(';').filter { it.isNotBlank() }.map { part ->
-                val (id, rest) = part.split(':')
+                val (key, rest) = part.split(':')
                 val (c, r, w, h) = rest.split(',').map { it.toInt() }
-                Slot(BlockId.valueOf(id), c, r, w, h)
-            }.filter { it.inBounds }.distinctBy { it.id }
+                val id = BlockId.valueOf(key.substringBefore('#'))
+                Slot(id, c, r, w, h, key.substringAfter('#', "0").toInt())
+            }.filter { it.inBounds }.distinctBy { it.key }
         } catch (e: Exception) {
             DEFAULT
         }
     }
 
-    fun encode(slots: List<Slot>) = slots.joinToString(";") { "${it.id.name}:${it.c},${it.r},${it.w},${it.h}" }
+    fun encode(slots: List<Slot>) = slots.joinToString(";") { "${it.key}:${it.c},${it.r},${it.w},${it.h}" }
 
-    fun fits(slots: List<Slot>, s: Slot) = s.inBounds && slots.none { it.id != s.id && it.overlaps(s) }
+    fun fits(slots: List<Slot>, s: Slot) = s.inBounds && slots.none { !it.same(s) && it.overlaps(s) }
 
     private fun area(a: Slot, b: Slot): Int {
         val w = minOf(a.c + a.w, b.c + b.w) - maxOf(a.c, b.c)
@@ -92,17 +98,17 @@ object LayoutStore {
     private fun valid(slots: List<Slot>) =
         slots.all { it.inBounds } && slots.indices.all { i -> (i + 1 until slots.size).none { j -> slots[i].overlaps(slots[j]) } }
 
-    private fun replace(slots: List<Slot>, vararg n: Slot) = slots.map { s -> n.firstOrNull { it.id == s.id } ?: s }
+    private fun replace(slots: List<Slot>, vararg n: Slot) = slots.map { s -> n.firstOrNull { it.same(s) } ?: s }
 
     /**
      * Przesunięcie klocka. Na wolne miejsce wprost; upuszczony na inny klocek zamienia się z nim
      * miejscami: najpierw z zachowaniem rozmiarów, a gdy się nie mieszczą – zamieniają się prostokątami.
      */
     fun move(slots: List<Slot>, from: Slot, to: Slot, finger: Pair<Int, Int>? = null): List<Slot> {
-        val cur = slots.firstOrNull { it.id == from.id } ?: return slots
+        val cur = slots.firstOrNull { it.same(from) } ?: return slots
         val t = to.copy(c = to.c.coerceIn(0, GRID_COLS - cur.w), r = to.r.coerceIn(0, GRID_ROWS - cur.h))
         if (fits(slots, t)) return replace(slots, t)
-        val others = slots.filter { it.id != cur.id }
+        val others = slots.filter { !it.same(cur) }
         // klocek pod palcem; gdy palec jest na pustym polu – ten, na który najbardziej nachodzi
         val other = finger?.let { (fc, fr) -> others.firstOrNull { fc in it.c until it.c + it.w && fr in it.r until it.r + it.h } }
             ?: others.maxByOrNull { area(it, t) }?.takeIf { area(it, t) > 0 } ?: return slots
@@ -132,11 +138,11 @@ object LayoutStore {
 
     /** Zmiana rozmiaru. Gdy powiększony klocek wchodzi na sąsiada, sąsiad się zwęża (jeśli może). */
     fun resize(slots: List<Slot>, s: Slot, w: Int, h: Int): List<Slot> {
-        val cur = slots.firstOrNull { it.id == s.id } ?: return slots
+        val cur = slots.firstOrNull { it.same(s) } ?: return slots
         val n = cur.copy(w = w.coerceIn(cur.id.minW, GRID_COLS - cur.c), h = h.coerceIn(cur.id.minH, GRID_ROWS - cur.r))
         if (n == cur) return slots
         val out = slots.map { o ->
-            if (o.id == n.id) return@map n
+            if (o.same(n)) return@map n
             if (!o.overlaps(n)) return@map o
             when {
                 // sąsiad po prawej: przesuwa się w prawo i zwęża
@@ -149,16 +155,20 @@ object LayoutStore {
         return if (valid(out)) out else slots
     }
 
-    /** Pierwsze wolne miejsce na ukryty klocek, w najmniejszym rozmiarze. */
+    /** Pierwszy wolny numer egzemplarza klocka (dla klocków [BlockId.multi]). */
+    fun nextN(slots: List<Slot>, id: BlockId) = generateSequence(0) { it + 1 }.first { n -> slots.none { it.id == id && it.n == n } }
+
+    /** Pierwsze wolne miejsce na ukryty (albo kolejny) klocek, w najmniejszym rozmiarze. */
     fun place(slots: List<Slot>, id: BlockId): List<Slot>? {
+        val n = nextN(slots, id)
         for (r in 0 until GRID_ROWS) for (c in 0 until GRID_COLS) {
-            val s = Slot(id, c, r, id.minW, id.minH)
+            val s = Slot(id, c, r, id.minW, id.minH, n)
             if (fits(slots, s)) return slots + s
         }
         // siatka pełna: zwęź najszerszy klocek o jedną kolumnę z prawej i wstaw nowy w zwolnione miejsce
         val wide = slots.filter { it.w > it.id.minW }.maxByOrNull { it.w } ?: return null
         val narrowed = wide.copy(w = wide.w - 1)
-        val s = Slot(id, wide.c + wide.w - 1, wide.r, 1, wide.h)
+        val s = Slot(id, wide.c + wide.w - 1, wide.r, 1, wide.h, n)
         val next = slots.map { if (it == wide) narrowed else it } + s
         return if (s.inBounds && next.none { a -> next.any { b -> a !== b && a.overlaps(b) } }) next else null
     }
@@ -174,6 +184,8 @@ fun BlockGrid(
     edit: Boolean,
     gap: Dp,
     onChange: (List<Slot>) -> Unit,
+    /** dodatkowe przyciski klocka w trybie edycji (np. „zmień widżet”) */
+    editExtra: @Composable androidx.compose.foundation.layout.BoxScope.(Slot) -> Unit = {},
     content: @Composable (Slot) -> Unit,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -206,7 +218,7 @@ fun BlockGrid(
         }
 
         for (slot in slots) {
-            androidx.compose.runtime.key(slot.id) {
+            androidx.compose.runtime.key(slot.key) {
                 var drag by remember { mutableStateOf(Offset.Zero) }
                 var start by remember { mutableStateOf(Offset.Zero) }
                 var grow by remember { mutableStateOf(Offset.Zero) }
@@ -234,9 +246,9 @@ fun BlockGrid(
                                         style = Stroke(width = 4f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(24f, 14f))),
                                     )
                                 }
-                                .pointerInput(slot.id) {
+                                .pointerInput(slot.key) {
                                     fun target(): Slot {
-                                        val s0 = cur.first { it.id == slot.id }
+                                        val s0 = cur.first { it.same(slot) }
                                         return s0.copy(
                                             c = (s0.c + (drag.x / stepX).roundToInt()).coerceIn(0, GRID_COLS - s0.w),
                                             r = (s0.r + (drag.y / stepY).roundToInt()).coerceIn(0, GRID_ROWS - s0.h),
@@ -245,7 +257,7 @@ fun BlockGrid(
                                     detectDragGestures(
                                         onDragStart = { start = it },
                                         onDragEnd = {
-                                            val s0 = cur.first { it.id == slot.id }
+                                            val s0 = cur.first { it.same(slot) }
                                             val to = target()
                                             val p = start + drag
                                             val finger = (s0.c + kotlin.math.floor(p.x / stepX).toInt()) to
@@ -268,18 +280,18 @@ fun BlockGrid(
                         Box(
                             Modifier.align(Alignment.TopEnd).padding(d(12)).size(d(56))
                                 .clip(RoundedCornerShape(d(16))).background(Color(0xFFFF6B6B))
-                                .pointerInput(slot.id) {
+                                .pointerInput(slot.key) {
                                     detectDragGestures { c, _ -> c.consume() }
                                 }
-                                .then(Modifier.clickableNoRipple { change(cur.filter { it.id != slot.id }) }),
+                                .then(Modifier.clickableNoRipple { change(cur.filter { !it.same(slot) }) }),
                             contentAlignment = Alignment.Center,
                         ) { Icon(Icons.Outlined.Close, "Ukryj", tint = Color.White, modifier = Modifier.size(d(32))) }
                         Box(
                             Modifier.align(Alignment.BottomEnd).padding(d(12)).size(d(64))
                                 .clip(RoundedCornerShape(d(18))).background(accent)
-                                .pointerInput(slot.id) {
+                                .pointerInput(slot.key) {
                                     fun target(): Slot {
-                                        val s0 = cur.first { it.id == slot.id }
+                                        val s0 = cur.first { it.same(slot) }
                                         return s0.copy(
                                             w = (s0.w + (grow.x / stepX).roundToInt()).coerceIn(s0.id.minW, GRID_COLS - s0.c),
                                             h = (s0.h + (grow.y / stepY).roundToInt()).coerceIn(s0.id.minH, GRID_ROWS - s0.r),
@@ -287,7 +299,7 @@ fun BlockGrid(
                                     }
                                     detectDragGestures(
                                         onDragEnd = {
-                                            val s0 = cur.first { it.id == slot.id }
+                                            val s0 = cur.first { it.same(slot) }
                                             val t = target()
                                             grow = Offset.Zero
                                             preview = null
@@ -302,6 +314,7 @@ fun BlockGrid(
                                 },
                             contentAlignment = Alignment.Center,
                         ) { Icon(Icons.Outlined.OpenInFull, "Zmień rozmiar", tint = Color(0xFF031426), modifier = Modifier.size(d(34))) }
+                        editExtra(slot)
                     }
                 }
             }

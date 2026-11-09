@@ -31,7 +31,8 @@ class MainActivity : ComponentActivity() {
     /** Lista aplikacji; odświeżana po instalacji lub usunięciu aplikacji. */
     val apps = mutableStateOf<List<AppEntry>>(emptyList())
     val cameraWidgetId = mutableIntStateOf(-1)
-    val blockWidgetId = mutableIntStateOf(-1)
+    /** widżety klocków „Widżet”: numer klocka (Slot.n) → id widżetu */
+    val blockWidgets = androidx.compose.runtime.mutableStateMapOf<Int, Int>()
     val liveCamera = mutableStateOf("")
     val carModelPath = mutableStateOf("")
     val layout = mutableStateOf(LayoutStore.DEFAULT)
@@ -46,8 +47,8 @@ class MainActivity : ComponentActivity() {
     val visible = mutableStateOf(false)
 
     private var pendingWidgetId = -1
-    /** true: dodawany widżet trafi do klocka „Widżet”, false: do klocka kamery */
-    private var pendingForBlock = false
+    /** numer klocka „Widżet”, do którego trafi dodawany widżet; -1 = klocek kamery */
+    private var pendingBlock = -1
 
     private val bindLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
         if (r.resultCode == RESULT_OK) configureWidget(pendingWidgetId) else dropPending()
@@ -62,6 +63,35 @@ class MainActivity : ComponentActivity() {
     private val configureLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
         if (r.resultCode == RESULT_OK) saveWidget(pendingWidgetId) else dropPending()
     }
+    /** Mowa → tekst (Google) dla asystenta. */
+    private var onSpeech: ((String) -> Unit)? = null
+    private val speechLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        val text = r.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+        if (r.resultCode == RESULT_OK && !text.isNullOrBlank()) onSpeech?.invoke(text)
+        onSpeech = null
+    }
+
+    /** Okienko rozpoznawania mowy; false, gdy radio go nie ma. */
+    fun listen(onText: (String) -> Unit): Boolean {
+        val i = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "pl-PL")
+            .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Powiedz, o co chcesz zapytać")
+        return try {
+            onSpeech = onText
+            speechLauncher.launch(i)
+            true
+        } catch (_: Exception) {
+            onSpeech = null
+            false
+        }
+    }
+
+    /** Tekst → mowa: odpowiedzi asystenta czytane na głos (Speech.kt). */
+    fun speak(text: String) = Speech.speak(this, text)
+
+    fun stopSpeaking() = Speech.stop()
+
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         location.start()
     }
@@ -81,12 +111,12 @@ class MainActivity : ComponentActivity() {
         widgetHost = AppWidgetHost(this, WIDGET_HOST_ID)
         location = LocationRepo(this)
         cameraWidgetId.intValue = Prefs.cameraWidgetId
-        blockWidgetId.intValue = Prefs.blockWidgetId
         liveCamera.value = Prefs.liveCamera
         CarModel.installDefault(this)
         CanSource.start(this)
         carModelPath.value = Prefs.carModel
         layout.value = LayoutStore.decode(Prefs.layout)
+        layout.value.filter { it.id == BlockId.WIDGET }.forEach { blockWidgets[it.n] = Prefs.blockWidgetId(it.n) }
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).apply {
@@ -103,6 +133,7 @@ class MainActivity : ComponentActivity() {
         }, ContextCompat.RECEIVER_NOT_EXPORTED)
 
         setContent { LauncherScreen(this) }
+        handleVoiceIntent(intent)
 
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
@@ -136,12 +167,41 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         unregisterReceiver(packagesChanged)
+        Speech.shutdown()
         super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (intent.hasCategory(Intent.CATEGORY_HOME)) homePressed.intValue++
+        handleVoiceIntent(intent)
+    }
+
+    /** Przycisk głosowy / ASSIST / VOICE_COMMAND: od razu słuchamy pytania do asystenta. */
+    private fun handleVoiceIntent(intent: Intent?) {
+        val a = intent?.action ?: return
+        if (a == Intent.ACTION_VOICE_COMMAND || a == Intent.ACTION_ASSIST) startVoiceAssistant()
+    }
+
+    fun startVoiceAssistant() {
+        stopSpeaking()
+        if (!Assistant.hasKey()) {
+            android.widget.Toast.makeText(this, "Asystent: wpisz klucz API w Ustawieniach → Asystent AI", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+        if (!listen { Assistant.send(this, it) }) {
+            android.widget.Toast.makeText(this, "Radio nie ma rozpoznawania mowy (Google)", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** Klawisze asystenta/wyszukiwania (np. z kierownicy), gdy Kokpit jest na ekranie. */
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        val voiceKeys = setOf(android.view.KeyEvent.KEYCODE_VOICE_ASSIST, android.view.KeyEvent.KEYCODE_ASSIST, android.view.KeyEvent.KEYCODE_SEARCH)
+        if (event.keyCode in voiceKeys) {
+            if (event.action == android.view.KeyEvent.ACTION_UP) startVoiceAssistant()
+            return true
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     @Deprecated("Ekran główny nie ma dokąd wrócić")
@@ -171,6 +231,9 @@ class MainActivity : ComponentActivity() {
     }
 
     fun saveLayout(slots: List<Slot>) {
+        // ukryty klocek „Widżet” zwalnia swój widżet; ponowne dodanie zaczyna od wyboru
+        val kept = slots.filter { it.id == BlockId.WIDGET }.map { it.n }.toSet()
+        layout.value.filter { it.id == BlockId.WIDGET && it.n !in kept }.forEach { removeBlockWidget(it.n) }
         layout.value = slots
         Prefs.layout = LayoutStore.encode(slots)
     }
@@ -192,7 +255,7 @@ class MainActivity : ComponentActivity() {
     fun addCameraWidget() {
         val id = widgetHost.allocateAppWidgetId()
         pendingWidgetId = id
-        pendingForBlock = false
+        pendingBlock = -1
         val provider = widgetManager.installedProviders.firstOrNull { it.provider.packageName == XIAOMI_CAM }?.provider
         if (provider == null) {
             pickLauncher.launch(Intent(AppWidgetManager.ACTION_APPWIDGET_PICK).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id))
@@ -209,11 +272,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Widżet wybrany z listy Kokpitu do klocka „Widżet”. */
-    fun addBlockWidget(provider: android.content.ComponentName) {
+    /** Widżet wybrany z listy Kokpitu do klocka „Widżet” nr [n]. */
+    fun addBlockWidget(n: Int, provider: android.content.ComponentName) {
         val id = widgetHost.allocateAppWidgetId()
         pendingWidgetId = id
-        pendingForBlock = true
+        pendingBlock = n
         if (widgetManager.bindAppWidgetIdIfAllowed(id, provider)) {
             configureWidget(id)
         } else {
@@ -225,11 +288,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    fun removeBlockWidget() {
-        val id = Prefs.blockWidgetId
+    /** Usuwa widżet klocka nr [n] (klocek ukryty w edycji układu). */
+    fun removeBlockWidget(n: Int) {
+        val id = Prefs.blockWidgetId(n)
         if (id != -1) widgetHost.deleteAppWidgetId(id)
-        Prefs.blockWidgetId = -1
-        blockWidgetId.intValue = -1
+        Prefs.setBlockWidgetId(n, -1)
+        blockWidgets.remove(n)
     }
 
     fun removeCameraWidget() {
@@ -257,11 +321,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun saveWidget(id: Int) {
-        if (pendingForBlock) {
-            val old = Prefs.blockWidgetId
+        if (pendingBlock != -1) {
+            val n = pendingBlock
+            val old = Prefs.blockWidgetId(n)
             if (old != -1 && old != id) widgetHost.deleteAppWidgetId(old)
-            Prefs.blockWidgetId = id
-            blockWidgetId.intValue = id
+            Prefs.setBlockWidgetId(n, id)
+            blockWidgets[n] = id
             pendingWidgetId = -1
             return
         }

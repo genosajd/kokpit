@@ -12,8 +12,8 @@ android {
         applicationId = "pl.lawinski.radiolauncher"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "0.3.5"
+        versionCode = 10
+        versionName = "0.3.6"
         // radio: arm64 (Snapdragon 668S); x86_64 tylko dla emulatora
         // -PdoAuta: tylko arm64, mniejszy plik do instalacji w radiu
         ndk { abiFilters += if (project.hasProperty("doAuta")) listOf("arm64-v8a") else listOf("arm64-v8a", "x86_64") }
@@ -23,7 +23,7 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // bez własnego klucza: podpis debug wystarcza do instalacji z pendrive'a
             signingConfig = signingConfigs.getByName("debug")
         }
@@ -53,6 +53,9 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:$media3")
     implementation("androidx.media3:media3-exoplayer-rtsp:$media3")
     implementation("androidx.media3:media3-ui:$media3")
+
+    // asystent AI w bloku „Asystent” (Claude); OpenAI idzie zwykłym HTTPS
+    implementation("com.anthropic:anthropic-java:3.6.0")
 
     // model 3D auta (.glb) obracany palcem
     val filament = "1.56.0"

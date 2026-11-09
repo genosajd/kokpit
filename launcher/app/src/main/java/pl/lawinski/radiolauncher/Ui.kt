@@ -56,6 +56,11 @@ import androidx.compose.material.icons.outlined.WbCloudy
 import androidx.compose.material.icons.outlined.WbSunny
 import androidx.compose.material.icons.outlined.Widgets
 import androidx.compose.material.icons.outlined.Work
+import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.RestartAlt
+import androidx.compose.material.icons.outlined.SmartToy
+import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -77,6 +82,8 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -104,6 +111,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -146,8 +154,12 @@ sealed interface Dlg {
     data class Picker(val title: String, val drawer: Boolean = false, val onPick: (String) -> Unit) : Dlg
     data class Menu(val index: Int) : Dlg
     data class Address(val work: Boolean) : Dlg
+    data object Place3 : Dlg
+    data class Ai(val field: AiField) : Dlg
+    data object Voices : Dlg
     data object Cameras : Dlg
-    data object Widgets : Dlg
+    /** wybór widżetu do klocka „Widżet” nr n */
+    data class Widgets(val n: Int) : Dlg
 }
 
 /** Edycja układu tylko na postoju: powyżej tej prędkości z GPS przycisk jest nieaktywny. */
@@ -213,7 +225,10 @@ fun LauncherScreen(act: MainActivity) {
                         )
                     }
                     Box(Modifier.weight(1f).fillMaxWidth().padding(top = d(8), bottom = d(28))) {
-                        BlockGrid(slots, edit, d(20), onChange = { act.saveLayout(it) }) { slot ->
+                        BlockGrid(slots, edit, d(20), onChange = { act.saveLayout(it) },
+                            editExtra = { slot ->
+                                if (slot.id == BlockId.WIDGET) WidgetChangeButton { dialog = Dlg.Widgets(slot.n) }
+                            }) { slot ->
                             val m = Modifier.fillMaxSize()
                             when (slot.id) {
                                 BlockId.SHORTCUTS -> ShortcutsBlock(m, slot, apps, shortcuts,
@@ -226,10 +241,11 @@ fun LauncherScreen(act: MainActivity) {
                                     },
                                     onDrawer = { dialog = Dlg.Picker("Aplikacje", drawer = true) { Apps.launch(act, it) } })
                                 BlockId.CAR -> CarBlock(m, act, apps, edit, onSplitSettings = { dialog = Dlg.Settings })
-                                BlockId.NAV -> NavBlock(m, slot, act, onAddress = { dialog = Dlg.Address(it) })
+                                BlockId.NAV -> NavBlock(m, slot, act, onAddress = { dialog = Dlg.Address(it) }, onPlace3 = { dialog = Dlg.Place3 })
                                 BlockId.CAMERA -> CameraBlock(m, act, onChoose = { dialog = Dlg.Cameras })
                                 BlockId.WEATHER -> WeatherBlock(m, slot, act)
-                                BlockId.WIDGET -> WidgetBlock(m, act, onChoose = { dialog = Dlg.Widgets })
+                                BlockId.ASSISTANT -> AssistantBlock(m, slot, act, onSettings = { Prefs.settingsGroup = 7; dialog = Dlg.Settings })
+                                BlockId.WIDGET -> WidgetBlock(m, act, slot.n, onChoose = { dialog = Dlg.Widgets(slot.n) })
                             }
                         }
                     }
@@ -241,8 +257,10 @@ fun LauncherScreen(act: MainActivity) {
                         onClose = { dialog = null },
                         onPicker = { dialog = it },
                         onAddress = { dialog = Dlg.Address(it) },
+                        onPlace3 = { dialog = Dlg.Place3 },
+                        onAiField = { dialog = Dlg.Ai(it) },
+                        onVoices = { dialog = Dlg.Voices },
                         onCameras = { dialog = Dlg.Cameras },
-                        onWidgets = { dialog = Dlg.Widgets },
                         onEditLayout = { dialog = null; edit = true },
                         onDemo = { demo = it },
                         onResetShortcuts = { saveShortcuts(Apps.defaultShortcuts(apps)) })
@@ -263,10 +281,13 @@ fun LauncherScreen(act: MainActivity) {
                         },
                     )
                     is Dlg.Address -> AddressDialog(dl.work, onClose = { dialog = null })
+                    is Dlg.Place3 -> Place3Dialog(onClose = { dialog = null })
+                    is Dlg.Ai -> AiFieldDialog(dl.field, onClose = { dialog = Dlg.Settings })
+                    is Dlg.Voices -> VoicePickerDialog(act, onClose = { dialog = Dlg.Settings })
                     is Dlg.Cameras -> CameraPickerDialog(act, onClose = { dialog = null })
                     is Dlg.Widgets -> WidgetPickerDialog(act, onClose = { dialog = null }) { provider ->
                         dialog = null
-                        act.addBlockWidget(provider)
+                        act.addBlockWidget(dl.n, provider)
                     }
                 }
             }
@@ -411,7 +432,7 @@ fun EditBar(slots: List<Slot>, onAdd: (BlockId) -> Unit, onReset: () -> Unit, on
     Row(Modifier.fillMaxWidth().height(d(76)), verticalAlignment = Alignment.CenterVertically) {
         Text("Przeciągnij klocek · niebieski uchwyt zmienia rozmiar", color = Dim, fontSize = s(24))
         Spacer(Modifier.width(d(30)))
-        BlockId.entries.filter { id -> slots.none { it.id == id } }.forEach { id ->
+        BlockId.entries.filter { id -> id.multi || slots.none { it.id == id } }.forEach { id ->
             Pill(Icons.Outlined.Add, id.title, onClick = { onAdd(id) })
             Spacer(Modifier.width(d(12)))
         }
@@ -786,7 +807,7 @@ fun SmallAppIcon(app: AppEntry?) {
 // ---------- nawigacja ----------
 
 @Composable
-fun NavBlock(modifier: Modifier, slot: Slot, act: MainActivity, onAddress: (Boolean) -> Unit) {
+fun NavBlock(modifier: Modifier, slot: Slot, act: MainActivity, onAddress: (Boolean) -> Unit, onPlace3: () -> Unit) {
     val nav by NavState.info.collectAsState()
     val listenerOn = remember(act.resumeTick.intValue) { NavListener.isEnabled(act) }
     val compact = slot.h == 1
@@ -832,42 +853,55 @@ fun NavBlock(modifier: Modifier, slot: Slot, act: MainActivity, onAddress: (Bool
                 }
             }
             Spacer(Modifier.weight(1f))
+            val place3 = Prefs.place3Name.ifBlank { null }
             if (compact) {
                 Row(horizontalArrangement = Arrangement.spacedBy(d(12))) {
-                    DestButton(Icons.Outlined.Home, if (slot.w > 1) "Dom" else "", Prefs.home, false, act, Modifier.weight(1f)) { onAddress(false) }
-                    DestButton(Icons.Outlined.Work, if (slot.w > 1) "Praca" else "", Prefs.work, true, act, Modifier.weight(1f)) { onAddress(true) }
+                    val wide = slot.w > 2
+                    DestButton(Icons.Outlined.Home, if (wide) "Dom" else "", Modifier.weight(1f), { goSaved(act, Prefs.home, false) }) { onAddress(false) }
+                    DestButton(Icons.Outlined.Work, if (wide) "Praca" else "", Modifier.weight(1f), { goSaved(act, Prefs.work, true) }) { onAddress(true) }
+                    if (place3 != null) DestButton(Icons.Outlined.Place, if (wide) place3 else "", Modifier.weight(1f), { goPlace3(act) }, onPlace3)
                 }
             } else {
-                DestButton(Icons.Outlined.Home, "Dom", Prefs.home, false, act) { onAddress(false) }
-                Spacer(Modifier.height(d(14)))
-                DestButton(Icons.Outlined.Work, "Praca", Prefs.work, true, act) { onAddress(true) }
+                DestButton(Icons.Outlined.Home, "Dom", onClick = { goSaved(act, Prefs.home, false) }) { onAddress(false) }
+                Spacer(Modifier.height(d(12)))
+                DestButton(Icons.Outlined.Work, "Praca", onClick = { goSaved(act, Prefs.work, true) }) { onAddress(true) }
+                if (place3 != null) {
+                    Spacer(Modifier.height(d(12)))
+                    DestButton(Icons.Outlined.Place, place3, onClick = { goPlace3(act) }, onEdit = onPlace3)
+                }
             }
         }
     }
 }
 
+/** Dom/Praca: własny adres, a bez niego miejsce zapisane w Mapach Google. */
+fun goSaved(act: MainActivity, address: String, work: Boolean) {
+    if (address.isNotBlank()) navigateTo(act, address)
+    else if (!navigateSaved(act, work)) android.widget.Toast.makeText(
+        act, "Dom i Praca z Map Google działają, gdy Kokpit F11 jest ekranem głównym. Przytrzymaj, aby wpisać adres.",
+        android.widget.Toast.LENGTH_LONG,
+    ).show()
+}
+
+/** Trzecie miejsce: adres wpisany w Kokpicie, a bez niego etykieta wyszukana w Mapach Google. */
+fun goPlace3(act: MainActivity) {
+    val address = Prefs.place3Address
+    if (address.isNotBlank()) navigateTo(act, address) else searchInMaps(act, Prefs.place3Name)
+}
+
+/** Przycisk celu; przytrzymanie = zmiana adresu. */
 @Composable
-fun DestButton(icon: ImageVector, name: String, address: String, work: Boolean, act: MainActivity, modifier: Modifier = Modifier.fillMaxWidth(), onEdit: () -> Unit) {
+fun DestButton(icon: ImageVector, name: String, modifier: Modifier = Modifier.fillMaxWidth(), onClick: () -> Unit, onEdit: () -> Unit) {
     Row(
         modifier.kokpitSurface(d(18))
-            .combinedClickable(
-                // bez własnego adresu: Dom/Praca zapisane w Mapach Google; przytrzymanie = własny adres
-                onClick = {
-                    if (address.isNotBlank()) navigateTo(act, address)
-                    else if (!navigateSaved(act, work)) android.widget.Toast.makeText(
-                        act, "Dom i Praca z Map Google działają, gdy Kokpit F11 jest ekranem głównym. Przytrzymaj, aby wpisać adres.",
-                        android.widget.Toast.LENGTH_LONG,
-                    ).show()
-                },
-                onLongClick = onEdit,
-            )
-            .padding(horizontal = d(20), vertical = d(18)),
+            .combinedClickable(onClick = onClick, onLongClick = onEdit)
+            .padding(horizontal = d(20), vertical = d(16)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, null, tint = Accent, modifier = Modifier.size(d(30)))
         if (name.isNotEmpty()) {
             Spacer(Modifier.width(d(14)))
-            Text(name, color = Txt, fontSize = s(24))
+            Text(name, color = Txt, fontSize = s(24), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -936,12 +970,12 @@ fun CameraBlock(modifier: Modifier, act: MainActivity, onChoose: () -> Unit) {
 // ---------- widżet dowolnej aplikacji ----------
 
 @Composable
-fun WidgetBlock(modifier: Modifier, act: MainActivity, onChoose: () -> Unit) {
-    val id = act.blockWidgetId.intValue
+fun WidgetBlock(modifier: Modifier, act: MainActivity, n: Int, onChoose: () -> Unit) {
+    val id = act.blockWidgets[n] ?: -1
     val ok = id != -1 && remember(id) { act.widgetManager.getAppWidgetInfo(id) } != null
     Block(modifier) {
         if (ok) {
-            // zmiana i usunięcie widżetu: Ustawienia → „Widżet: zmień / usuń”
+            // zmiana widżetu: Układ → przycisk w lewym dolnym rogu klocka; usunięcie: ukrycie klocka
             HostedWidget(act, id)
         } else {
             Column(
@@ -955,6 +989,23 @@ fun WidgetBlock(modifier: Modifier, act: MainActivity, onChoose: () -> Unit) {
                 Text("dowolnej zainstalowanej aplikacji", color = Dim, fontSize = s(20), textAlign = TextAlign.Center)
             }
         }
+    }
+}
+
+/** Przycisk „Zmień widżet” w lewym dolnym rogu klocka w trybie edycji układu. */
+@Composable
+fun androidx.compose.foundation.layout.BoxScope.WidgetChangeButton(onClick: () -> Unit) {
+    Row(
+        Modifier.align(Alignment.BottomStart).padding(d(12)).height(d(64))
+            .clip(RoundedCornerShape(d(18))).background(Accent)
+            .pointerInput(Unit) { detectDragGestures { c, _ -> c.consume() } }
+            .clickableNoRipple(onClick)
+            .padding(horizontal = d(16)),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Outlined.Widgets, "Zmień widżet", tint = Color(0xFF031426), modifier = Modifier.size(d(34)))
+        Spacer(Modifier.width(d(8)))
+        Text("Zmień", color = Color(0xFF031426), fontSize = s(22), fontWeight = FontWeight.Medium)
     }
 }
 
@@ -979,6 +1030,87 @@ fun HostedWidget(act: MainActivity, id: Int) {
             },
             modifier = Modifier.fillMaxSize(),
         )
+    }
+}
+
+// ---------- asystent AI ----------
+
+@Composable
+fun AssistantBlock(modifier: Modifier, slot: Slot, act: MainActivity, onSettings: () -> Unit) {
+    val lines = Assistant.lines
+    val busy by Assistant.busy
+    var input by remember { mutableStateOf("") }
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    LaunchedEffect(lines.size, busy) { if (lines.isNotEmpty()) list.animateScrollToItem(lines.size - 1 + if (busy) 1 else 0) }
+    fun send() {
+        Assistant.send(act, input)
+        input = ""
+    }
+    Block(modifier) {
+        Column(Modifier.fillMaxSize().padding(d(22))) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { Label(Icons.Outlined.SmartToy, "Asystent · " + Assistant.providerName()) }
+                if (lines.isNotEmpty()) Icon(Icons.Outlined.RestartAlt, "Nowa rozmowa", tint = Dim,
+                    modifier = Modifier.size(d(40)).combinedClickable(onClick = { act.stopSpeaking(); Assistant.reset() }))
+            }
+            Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = d(12))) {
+                if (lines.isEmpty() && !busy) {
+                    Column(Modifier.fillMaxSize().combinedClickable(onClick = { if (!Assistant.hasKey()) onSettings() }), verticalArrangement = Arrangement.Center) {
+                        if (Assistant.hasKey()) {
+                            Text("Zapytaj o cokolwiek albo poproś o trasę", color = Txt, fontSize = s(24))
+                            Text("np. „ile mam paliwa?”, „zawieź mnie do najbliższej stacji”", color = Dim, fontSize = s(19), modifier = Modifier.padding(top = d(8)))
+                        } else {
+                            Text("Wpisz klucz API", color = Accent, fontSize = s(24))
+                            Text("Ustawienia → Asystent AI (Anthropic albo OpenAI)", color = Dim, fontSize = s(19), modifier = Modifier.padding(top = d(8)))
+                        }
+                    }
+                } else {
+                    androidx.compose.foundation.lazy.LazyColumn(state = list, verticalArrangement = Arrangement.spacedBy(d(10)), modifier = Modifier.fillMaxSize()) {
+                        items(lines.size) { i ->
+                            val l = lines[i]
+                            Box(Modifier.fillMaxWidth(), contentAlignment = if (l.fromUser) Alignment.CenterEnd else Alignment.CenterStart) {
+                                Text(
+                                    l.text, color = if (l.fromUser) LocalTheme.current.activeText else Txt, fontSize = s(22), lineHeight = s(30),
+                                    modifier = Modifier.fillMaxWidth(0.88f).wrapContentWidth(if (l.fromUser) Alignment.End else Alignment.Start)
+                                        .then(if (l.fromUser) Modifier.kokpitSurface(d(16), active = true) else Modifier.kokpitSurface(d(16)))
+                                        .combinedClickable(onClick = {}, onLongClick = { if (!l.fromUser) act.speak(l.text) })
+                                        .padding(horizontal = d(16), vertical = d(10)),
+                                )
+                            }
+                        }
+                        if (busy) item { Text("Myślę…", color = Dim, fontSize = s(20), modifier = Modifier.padding(start = d(8))) }
+                    }
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(d(10))) {
+                if (slot.w > 1) {
+                    androidx.compose.foundation.text.BasicTextField(
+                        input, { input = it }, singleLine = true,
+                        textStyle = TextStyle(color = Txt, fontSize = s(22)),
+                        cursorBrush = SolidColor(Accent),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { send() }),
+                        modifier = Modifier.weight(1f).kokpitSurface(d(16)).padding(horizontal = d(16), vertical = d(16)),
+                        decorationBox = { inner ->
+                            Box { if (input.isEmpty()) Text("Napisz…", color = Dim, fontSize = s(22)); inner() }
+                        },
+                    )
+                } else Spacer(Modifier.weight(1f))
+                if (input.isNotBlank()) {
+                    Box(Modifier.size(d(64)).kokpitSurface(d(16), active = true).combinedClickable(onClick = { send() }), contentAlignment = Alignment.Center) {
+                        Icon(Icons.AutoMirrored.Outlined.Send, "Wyślij", tint = LocalTheme.current.activeText, modifier = Modifier.size(d(32)))
+                    }
+                }
+                Box(
+                    Modifier.size(d(64)).kokpitSurface(d(16), active = input.isBlank()).combinedClickable(onClick = {
+                        act.stopSpeaking()
+                        if (!Assistant.hasKey()) onSettings()
+                        else if (!act.listen { Assistant.send(act, it) }) android.widget.Toast.makeText(act, "Radio nie ma rozpoznawania mowy (Google)", android.widget.Toast.LENGTH_LONG).show()
+                    }),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Icons.Outlined.Mic, "Mów", tint = if (input.isBlank()) LocalTheme.current.activeText else Accent, modifier = Modifier.size(d(34))) }
+            }
+        }
     }
 }
 

@@ -51,14 +51,22 @@ object Prefs {
         get() = sp.getString("work", "") ?: ""
         set(v) = sp.edit().putString("work", v).apply()
 
+    /** Trzecie miejsce w bloku Nawigacja: nazwa = etykieta w Mapach Google, adres opcjonalny */
+    var place3Name: String
+        get() = sp.getString("place3_name", "Praca Gabi") ?: ""
+        set(v) = sp.edit().putString("place3_name", v).apply()
+    var place3Address: String
+        get() = sp.getString("place3_address", "") ?: ""
+        set(v) = sp.edit().putString("place3_address", v).apply()
+
     var cameraWidgetId: Int
         get() = sp.getInt("camera_widget", -1)
         set(v) = sp.edit().putInt("camera_widget", v).apply()
 
-    /** widżet dowolnej aplikacji w klocku „Widżet” */
-    var blockWidgetId: Int
-        get() = sp.getInt("block_widget", -1)
-        set(v) = sp.edit().putInt("block_widget", v).apply()
+    /** widżet dowolnej aplikacji w klocku „Widżet” nr n (n = 0 zapisany jak w 0.3.5) */
+    fun blockWidgetId(n: Int) = sp.getInt(blockWidgetKey(n), -1)
+    fun setBlockWidgetId(n: Int, v: Int) = sp.edit().putInt(blockWidgetKey(n), v).apply()
+    private fun blockWidgetKey(n: Int) = if (n == 0) "block_widget" else "block_widget_$n"
 
     var layout: String?
         get() = sp.getString("layout", null)
@@ -84,6 +92,39 @@ object Prefs {
     var theme: String
         get() = sp.getString("theme", "flat") ?: "flat"
         set(v) = sp.edit().putString("theme", v).apply()
+
+    /** Asystent AI: dostawca (Assistant.ANTHROPIC / OPENAI), klucze API, modele, czytanie odpowiedzi */
+    var aiProvider: String
+        get() = sp.getString("ai_provider", Assistant.ANTHROPIC) ?: Assistant.ANTHROPIC
+        set(v) = sp.edit().putString("ai_provider", v).apply()
+    var anthropicKey: String
+        get() = sp.getString("anthropic_key", "") ?: ""
+        set(v) = sp.edit().putString("anthropic_key", v).apply()
+    var openaiKey: String
+        get() = sp.getString("openai_key", "") ?: ""
+        set(v) = sp.edit().putString("openai_key", v).apply()
+    var anthropicModel: String
+        get() = sp.getString("anthropic_model", "")?.ifBlank { null } ?: Assistant.DEFAULT_CLAUDE_MODEL
+        set(v) = sp.edit().putString("anthropic_model", v).apply()
+    var openaiModel: String
+        get() = sp.getString("openai_model", "")?.ifBlank { null } ?: Assistant.DEFAULT_OPENAI_MODEL
+        set(v) = sp.edit().putString("openai_model", v).apply()
+    /** Głos odpowiedzi: Speech.SYSTEM / Speech.OPENAI, nazwa głosu systemowego, głos i model TTS OpenAI */
+    var ttsEngine: String
+        get() = sp.getString("tts_engine", Speech.SYSTEM) ?: Speech.SYSTEM
+        set(v) = sp.edit().putString("tts_engine", v).apply()
+    var ttsVoice: String
+        get() = sp.getString("tts_voice", "") ?: ""
+        set(v) = sp.edit().putString("tts_voice", v).apply()
+    var openaiVoice: String
+        get() = sp.getString("openai_voice", Speech.DEFAULT_OPENAI_VOICE) ?: Speech.DEFAULT_OPENAI_VOICE
+        set(v) = sp.edit().putString("openai_voice", v).apply()
+    var openaiTtsModel: String
+        get() = sp.getString("openai_tts_model", "")?.ifBlank { null } ?: Speech.DEFAULT_OPENAI_TTS_MODEL
+        set(v) = sp.edit().putString("openai_tts_model", v).apply()
+    var aiSpeak: Boolean
+        get() = sp.getBoolean("ai_speak", true)
+        set(v) = sp.edit().putBoolean("ai_speak", v).apply()
 
     /** Ostrzeżenie „Zapnij pasy” z CAN; domyślnie wyłączone, bo sygnał obejmuje też puste fotele. */
     var beltWarn: Boolean
@@ -178,6 +219,23 @@ fun navigateTo(ctx: Context, address: String) {
     } catch (e: Exception) {
         try {
             ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=" + Uri.encode(address))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (_: Exception) {
+        }
+    }
+}
+
+/**
+ * Miejsce z własną etykietą w Mapach Google (np. „Praca Gabi”). Mapy nie udostępniają
+ * takich etykiet innym aplikacjom, więc Kokpit wyszukuje nazwę w Mapach – wyszukiwarka Map
+ * podpowiada etykiety zalogowanego konta jako pierwszy wynik. Potem „Trasa” w Mapach.
+ */
+fun searchInMaps(ctx: Context, query: String) {
+    val i = Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=" + Uri.encode(query))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    try {
+        ctx.startActivity(Intent(i).setPackage("com.google.android.apps.maps"))
+    } catch (_: Exception) {
+        try {
+            ctx.startActivity(i)
         } catch (_: Exception) {
         }
     }

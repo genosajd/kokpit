@@ -31,7 +31,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 
 /*
- * Animacje wyglądu „Animowany” (KokpitTheme.animated).
+ * Animacje wyglądów z KokpitTheme.animated (BMW iDrive, M Sport).
  * Działają tylko, gdy Kokpit jest na ekranie i nie trwa edycja układu (LocalAnimate).
  * Każda zmienia wyłącznie właściwości warstwy (przesunięcie, krycie, skalę) w graphicsLayer,
  * więc w każdej klatce radio tylko składa gotowe warstwy, bez przerysowywania treści bloków.
@@ -58,10 +58,11 @@ fun loop(durationMs: Int, reverse: Boolean = true, delayMs: Int = 0): State<Floa
 fun Aurora() {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val w = with(LocalDensity.current) { maxWidth.toPx() }
+        val (c1, c2) = LocalTheme.current.aurora
         val a = loop(14000)
         val b = loop(19000, delayMs = 6000)
-        Glow(Color(0x524DA3FF), Alignment.TopStart) { translationX = w * (0.05f + 0.6f * a.value); translationY = -size.height * 0.55f }
-        Glow(Color(0x2E785AFF), Alignment.BottomStart) { translationX = w * (0.65f - 0.6f * b.value); translationY = size.height * 0.55f }
+        Glow(c1, Alignment.TopStart) { translationX = w * (0.05f + 0.6f * a.value); translationY = -size.height * 0.55f }
+        Glow(c2, Alignment.BottomStart) { translationX = w * (0.65f - 0.6f * b.value); translationY = size.height * 0.55f }
     }
 }
 
@@ -81,6 +82,7 @@ private var blockCounter = 0
 fun BoxScope.BlockSweep() {
     val delay = remember { (blockCounter++ % 6) * 1100 }
     val p = loop(7000, reverse = false, delayMs = delay)
+    val c = LocalTheme.current.sweep
     Box(
         Modifier.align(Alignment.TopStart).fillMaxWidth(0.4f).height(2.dp)
             .graphicsLayer {
@@ -88,7 +90,7 @@ fun BoxScope.BlockSweep() {
                 translationX = (x * 3.6f - 1f) * size.width
                 alpha = if (p.value > 0.45f) 0f else 1f
             }
-            .drawBehind { drawRect(Brush.horizontalGradient(listOf(Color.Transparent, Color(0xE6A0D2FF), Color.Transparent))) }
+            .drawBehind { drawRect(Brush.horizontalGradient(listOf(Color.Transparent, c, Color.Transparent))) }
     )
 }
 
