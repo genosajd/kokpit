@@ -1,6 +1,11 @@
 package pl.lawinski.radiolauncher
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
@@ -48,6 +53,7 @@ enum class BlockId(val title: String, val minW: Int, val minH: Int, val multi: B
     WEATHER("Pogoda", 1, 1),
     WIDGET("Widżet", 1, 1, multi = true),
     ASSISTANT("Asystent", 1, 1),
+    CLIMATE("Klima", 1, 1),
 }
 
 /** Położenie klocka na siatce 8 × 2: kolumna, rząd, szerokość, wysokość; n = numer egzemplarza. */
@@ -59,7 +65,12 @@ data class Slot(val id: BlockId, val c: Int, val r: Int, val w: Int, val h: Int,
     val inBounds get() = c >= 0 && r >= 0 && w >= id.minW && h >= id.minH && c + w <= GRID_COLS && r + h <= GRID_ROWS
 }
 
-const val GRID_COLS = 8
+/** Liczba stron ekranu (po 8 kolumn), Ustawienia → Ekran. */
+object GridPages {
+    val count by lazy { androidx.compose.runtime.mutableIntStateOf(Prefs.gridPages.coerceIn(1, 3)) }
+}
+
+val GRID_COLS: Int get() = 8 * GridPages.count.intValue
 const val GRID_ROWS = 2
 
 object LayoutStore {
@@ -190,9 +201,27 @@ fun BlockGrid(
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val density = LocalDensity.current
-        val cellW = (maxWidth - gap * (GRID_COLS - 1)) / GRID_COLS
+        // kilka stron ekranu: zawsze 8 kolumn na szerokość ekranu, reszta przewijana w bok
+        // (w edycji też – przewija się palcem po pustych polach, klocki przeciąga się jak zwykle)
+        val pages = GridPages.count.intValue
+        val scrolling = pages > 1
+        val scroll = androidx.compose.foundation.rememberScrollState()
+        val pageW = maxWidth
+        val cellW = if (scrolling) (pageW - gap * 7) / 8 else (maxWidth - gap * (GRID_COLS - 1)) / GRID_COLS
+        val innerW = if (scrolling) pageW * pages + gap * (pages - 1) else maxWidth
+        // przewijanie po kawałku: po puszczeniu przyciąga do najbliższej kolumny, nie do całej strony
+        val colStep = with(density) { (cellW + gap).toPx() }
+        androidx.compose.runtime.LaunchedEffect(scroll.isScrollInProgress, scrolling, edit) {
+            if (scrolling && !edit && !scroll.isScrollInProgress) {
+                val target = (kotlin.math.round(scroll.value / colStep) * colStep).toInt().coerceIn(0, scroll.maxValue)
+                if (target != scroll.value) scroll.animateScrollTo(target)
+            }
+        }
         val cellH = (maxHeight - gap * (GRID_ROWS - 1)) / GRID_ROWS
+        Box(Modifier.fillMaxSize().then(if (scrolling) Modifier.horizontalScroll(scroll) else Modifier)) {
+        Box(Modifier.width(innerW).fillMaxHeight()) {
         val stepX = with(density) { (cellW + gap).toPx() }
+        val viewW = with(density) { pageW.toPx() }
         val stepY = with(density) { (cellH + gap).toPx() }
 
         if (edit) {
@@ -270,6 +299,21 @@ fun BlockGrid(
                                     ) { ch, amount ->
                                         ch.consume()
                                         drag += amount
+                                        // klocek przy krawędzi ekranu: przewiń siatkę i przesuń klocek razem z nią
+                                        if (scrolling) {
+                                            val s0 = cur.first { it.same(slot) }
+                                            val fingerX = s0.c * stepX + start.x + drag.x - scroll.value
+                                            val edge = viewW * 0.08f
+                                            val push = when {
+                                                fingerX > viewW - edge -> 24f
+                                                fingerX < edge -> -24f
+                                                else -> 0f
+                                            }
+                                            if (push != 0f) {
+                                                val moved = scroll.dispatchRawDelta(push)
+                                                drag += Offset(moved, 0f)
+                                            }
+                                        }
                                         preview = target()
                                     }
                                 },
@@ -317,6 +361,17 @@ fun BlockGrid(
                         editExtra(slot)
                     }
                 }
+            }
+        }
+        }
+        }
+        if (scrolling) {
+            // pasek przewijania na dole: jaka część całej siatki jest widoczna i gdzie
+            val trackW = d(240)
+            val thumbW = trackW / pages
+            val frac = if (scroll.maxValue > 0) scroll.value.toFloat() / scroll.maxValue else 0f
+            Box(Modifier.align(Alignment.BottomCenter).offset(y = gap * 0.9f).size(trackW, d(8)).clip(RoundedCornerShape(d(4))).background(Dim.copy(alpha = 0.3f))) {
+                Box(Modifier.offset(x = (trackW - thumbW) * frac).size(thumbW, d(8)).clip(RoundedCornerShape(d(4))).background(Txt.copy(alpha = 0.8f)))
             }
         }
     }

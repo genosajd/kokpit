@@ -35,6 +35,10 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AcUnit
+import androidx.compose.material.icons.outlined.Autorenew
+import androidx.compose.material.icons.outlined.WaterDrop
+import androidx.compose.material.icons.outlined.Air
+import androidx.compose.material.icons.outlined.PowerSettingsNew
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.ChevronLeft
@@ -111,6 +115,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -126,6 +131,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -160,6 +166,7 @@ sealed interface Dlg {
     data class Ai(val field: AiField) : Dlg
     data object Voices : Dlg
     data class Custom(val field: CustomField) : Dlg
+    data object Instructions : Dlg
     data object Cameras : Dlg
     /** wybór widżetu do klocka „Widżet” nr n */
     data class Widgets(val n: Int) : Dlg
@@ -252,6 +259,7 @@ fun LauncherScreen(act: MainActivity) {
                                 BlockId.NAV -> NavBlock(m, slot, act, onAddress = { dialog = Dlg.Address(it) }, onPlace3 = { dialog = Dlg.Place3 })
                                 BlockId.CAMERA -> CameraBlock(m, act, onChoose = { dialog = Dlg.Cameras })
                                 BlockId.WEATHER -> WeatherBlock(m, slot, act)
+                                BlockId.CLIMATE -> ClimateBlock(m, slot, act, onSettings = { Prefs.settingsGroup = 8; dialog = Dlg.Settings })
                                 BlockId.ASSISTANT -> AssistantBlock(m, slot, act, onSettings = { Prefs.settingsGroup = 7; dialog = Dlg.Settings })
                                 BlockId.WIDGET -> WidgetBlock(m, act, slot.n, onChoose = { dialog = Dlg.Widgets(slot.n) })
                             }
@@ -269,6 +277,7 @@ fun LauncherScreen(act: MainActivity) {
                         onAiField = { dialog = Dlg.Ai(it) },
                         onVoices = { dialog = Dlg.Voices },
                         onCustom = { dialog = Dlg.Custom(it) },
+                        onInstructions = { dialog = Dlg.Instructions },
                         onCameras = { dialog = Dlg.Cameras },
                         onEditLayout = { dialog = null; edit = true },
                         onDemo = { demo = it },
@@ -294,6 +303,7 @@ fun LauncherScreen(act: MainActivity) {
                     is Dlg.Ai -> AiFieldDialog(dl.field, onClose = { dialog = Dlg.Settings })
                     is Dlg.Voices -> VoicePickerDialog(act, onClose = { dialog = Dlg.Settings })
                     is Dlg.Custom -> CustomizeDialog(dl.field, onClose = { dialog = Dlg.Settings })
+                    is Dlg.Instructions -> InstructionsDialog(onClose = { dialog = Dlg.Settings })
                     is Dlg.Cameras -> CameraPickerDialog(act, onClose = { dialog = null })
                     is Dlg.Widgets -> WidgetPickerDialog(act, onClose = { dialog = null }) { provider ->
                         dialog = null
@@ -355,15 +365,35 @@ fun Modifier.kokpitSurface(radius: Dp, fill: Boolean = true, active: Boolean = f
     val shape = RoundedCornerShape(radius)
     val ring = d(3)
     val pulse = if (focused && LocalAnimate.current) loop(1600) else null
+    // naciśnięcie: element się wciska i rozjaśnia, żeby było widać, że dotyk zadziałał
+    var pressed by remember { mutableStateOf(false) }
+    val press by androidx.compose.animation.core.animateFloatAsState(
+        if (pressed) 1f else 0f,
+        androidx.compose.animation.core.tween(if (pressed) 70 else 220),
+        label = "press",
+    )
     this
         .onFocusChanged { focused = it.isFocused || it.hasFocus }
-        .then(
-            if (focused && t.selectedGrow) Modifier.graphicsLayer {
-                // delikatne powiększenie; w wyglądzie animowanym lekko „oddycha”
-                val sc = 1.03f + 0.015f * (pulse?.value ?: 0f)
-                scaleX = sc; scaleY = sc
-            } else Modifier
-        )
+        .pointerInput(Unit) {
+            // tylko obserwacja dotyku – nie zabiera zdarzeń przyciskom i przewijaniu
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false)
+                pressed = true
+                try {
+                    do {
+                        val ev = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                    } while (ev.changes.any { it.pressed })
+                } finally {
+                    pressed = false
+                }
+            }
+        }
+        .graphicsLayer {
+            // delikatne powiększenie przy wyborze pokrętłem (w wyglądzie animowanym „oddycha”) i wciśnięcie przy dotyku
+            val grow = if (focused && t.selectedGrow) 1.03f + 0.015f * (pulse?.value ?: 0f) else 1f
+            val sc = grow * (1f - 0.07f * press)
+            scaleX = sc; scaleY = sc
+        }
         .clip(shape)
         .then(
             when {
@@ -381,6 +411,10 @@ fun Modifier.kokpitSurface(radius: Dp, fill: Boolean = true, active: Boolean = f
                 else -> Modifier
             }
         )
+        .drawWithContent {
+            drawContent()
+            if (press > 0f) drawRect(t.selectedRing.copy(alpha = 0.35f * press))
+        }
 }
 
 @Composable
@@ -1039,6 +1073,161 @@ fun HostedWidget(act: MainActivity, id: Int) {
             },
             modifier = Modifier.fillMaxSize(),
         )
+    }
+}
+
+// ---------- klimatyzacja (Smart Life / Tuya) ----------
+
+private fun modeIcon(m: String?): ImageVector = when (m) {
+    "cold" -> Icons.Outlined.AcUnit
+    "hot" -> Icons.Outlined.WbSunny
+    "wet" -> Icons.Outlined.WaterDrop
+    "wind" -> Icons.Outlined.Air
+    else -> Icons.Outlined.Autorenew
+}
+
+@Composable
+fun ClimateBlock(modifier: Modifier, slot: Slot, act: MainActivity, onSettings: () -> Unit) {
+    val st by Tuya.state.collectAsState()
+    val err by Tuya.error.collectAsState()
+    val visible by act.visible
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    // odczyt co minutę, tylko gdy Kokpit jest na ekranie
+    LaunchedEffect(visible, Tuya.configured) {
+        while (visible && Tuya.configured) {
+            Tuya.refresh()
+            delay(60_000)
+        }
+    }
+    fun run(block: suspend () -> Unit) {
+        if (busy) return
+        busy = true
+        scope.launch { block(); busy = false }
+    }
+    // wąski blok: mniejsze przyciski, żeby zmieścił się też nawiew
+    val btn = if (slot.w == 1) d(50) else d(64)
+    // wybór nawiewu albo trybu: okienko z osobnym przyciskiem dla każdej wartości
+    var picker by remember { mutableStateOf<String?>(null) }
+    picker?.let { kind ->
+        val cur = Tuya.state.value
+        val options = if (kind == "fan") Tuya.fanValues.map { it to Tuya.fanName(it) } else Tuya.MODES
+        val selected = if (kind == "fan") cur?.fan else cur?.mode
+        androidx.compose.ui.window.Dialog(onDismissRequest = { picker = null }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+            Column(
+                Modifier.clip(RoundedCornerShape(d(28))).background(LocalTheme.current.block)
+                    .border(1.dp, LocalTheme.current.blockEdge, RoundedCornerShape(d(28))).padding(d(28)),
+            ) {
+                Text(if (kind == "fan") "Nawiew" else "Tryb", color = Txt, fontSize = s(28), fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(d(18)))
+                Row(horizontalArrangement = Arrangement.spacedBy(d(12))) {
+                    options.forEach { (value, label) ->
+                        val on = value == selected
+                        Box(
+                            Modifier.height(d(84)).width(d(150)).kokpitSurface(d(18), active = on)
+                                .combinedClickable(onClick = {
+                                    picker = null
+                                    run { if (kind == "fan") Tuya.setFan(value) else Tuya.setMode(value) }
+                                }),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(label, color = if (on) LocalTheme.current.activeText else Txt, fontSize = s(20), textAlign = TextAlign.Center, maxLines = 2)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Block(modifier) {
+        Column(Modifier.fillMaxSize().padding(d(24))) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { Label(Icons.Outlined.AcUnit, st?.name ?: "Klimatyzacja") }
+                if (busy) Text("…", color = Dim, fontSize = s(20))
+            }
+            val s0 = st
+            when {
+                !Tuya.configured -> Column(Modifier.fillMaxSize().combinedClickable(onClick = onSettings), verticalArrangement = Arrangement.Center) {
+                    Text("Połącz klimatyzator", color = Accent, fontSize = s(24))
+                    Text("Ustawienia → Dom (Smart Life): klucze Tuya", color = Dim, fontSize = s(19), modifier = Modifier.padding(top = d(8)))
+                }
+                s0 == null -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
+                    Text(err ?: "Łączenie z Tuya…", color = if (err != null) Warn else Dim, fontSize = s(20))
+                }
+                else -> {
+                    Spacer(Modifier.weight(1f))
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(s0.room?.let { "${it.toInt()}°" } ?: "–", color = Txt, fontSize = s(if (slot.h > 1) 92 else 64), fontWeight = FontWeight.Light)
+                        Column(Modifier.padding(start = d(14), bottom = d(14))) {
+                            Text("w domu", color = Dim, fontSize = s(18))
+                            s0.humidity?.let { Text("wilg. $it %", color = Dim, fontSize = s(18)) }
+                        }
+                    }
+                    // tryb jako przycisk: dotknięcie otwiera wybór (grzanie, chłodzenie, auto…)
+                    Row(Modifier.padding(top = d(6)), verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            Modifier.kokpitSurface(d(14), active = s0.on).combinedClickable(onClick = { picker = "mode" })
+                                .padding(horizontal = d(12), vertical = d(6)),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(modeIcon(s0.mode), null, tint = if (s0.on) LocalTheme.current.activeText else Accent, modifier = Modifier.size(d(24)))
+                            Spacer(Modifier.width(d(6)))
+                            Text(Tuya.modeName(s0.mode), color = if (s0.on) LocalTheme.current.activeText else Txt, fontSize = s(18), maxLines = 1)
+                        }
+                        Spacer(Modifier.width(d(10)))
+                        Text(
+                            if (!s0.online) "offline" else if (s0.on) "${s0.target?.let { if (it % 1f == 0f) it.toInt().toString() else it.toString() } ?: "–"}°" else "wył.",
+                            color = if (s0.on) Accent else Dim, fontSize = s(20), maxLines = 1,
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Row(horizontalArrangement = Arrangement.spacedBy(if (slot.w == 1) d(8) else d(10)), verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier.size(btn).kokpitSurface(d(16), active = s0.on).combinedClickable(onClick = { run { Tuya.setPower(!s0.on) } }),
+                            contentAlignment = Alignment.Center,
+                        ) { Icon(Icons.Outlined.PowerSettingsNew, if (s0.on) "Wyłącz" else "Włącz", tint = if (s0.on) LocalTheme.current.activeText else Txt, modifier = Modifier.size(d(32))) }
+                        val t = s0.target ?: 22f
+                        Box(Modifier.size(btn).kokpitSurface(d(16)).combinedClickable(onClick = { run { Tuya.setTarget(t - 0.5f) } }), contentAlignment = Alignment.Center) {
+                            Text("−", color = Txt, fontSize = s(34))
+                        }
+                        Box(Modifier.size(btn).kokpitSurface(d(16)).combinedClickable(onClick = { run { Tuya.setTarget(t + 0.5f) } }), contentAlignment = Alignment.Center) {
+                            Text("+", color = Txt, fontSize = s(34))
+                        }
+                        if (slot.h == 1 && s0.fan != null && Tuya.fanValues.isNotEmpty()) {
+                            val vals = Tuya.fanValues
+                            val fi = vals.indexOf(s0.fan)
+                            Row(
+                                Modifier.height(btn).then(if (slot.w > 1) Modifier.weight(1f) else Modifier).kokpitSurface(d(16))
+                                    .combinedClickable(onClick = { picker = "fan" })
+                                    .padding(horizontal = d(12)),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(Icons.Outlined.Air, "Nawiew", tint = Accent, modifier = Modifier.size(d(26)))
+                                if (slot.w > 1) {
+                                    Spacer(Modifier.width(d(6)))
+                                    Text(Tuya.fanName(s0.fan), color = Txt, fontSize = s(18), maxLines = 1)
+                                }
+                            }
+                        }
+                    }
+                    // prędkość nawiewu (osobny wiersz w wysokim bloku; w niskim – przycisk obok − +)
+                    if (slot.h > 1 && s0.fan != null && Tuya.fanValues.isNotEmpty()) {
+                        val vals = Tuya.fanValues
+                        val fi = vals.indexOf(s0.fan)
+                        Row(
+                            Modifier.padding(top = d(10)).fillMaxWidth().height(d(56)).kokpitSurface(d(16))
+                                .combinedClickable(onClick = { picker = "fan" })
+                                .padding(horizontal = d(16)),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Outlined.Air, null, tint = Accent, modifier = Modifier.size(d(28)))
+                            Spacer(Modifier.width(d(10)))
+                            Text("Nawiew: " + Tuya.fanName(s0.fan), color = Txt, fontSize = s(20), maxLines = 1)
+                        }
+                    }
+                    err?.let { Text(it, color = Warn, fontSize = s(16), maxLines = 2, modifier = Modifier.padding(top = d(6))) }
+                }
+            }
+        }
     }
 }
 

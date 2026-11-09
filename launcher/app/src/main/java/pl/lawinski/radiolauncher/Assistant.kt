@@ -103,6 +103,15 @@ private object AssistantTools {
             listOf("action", "camera", "direction", "amount"),
         ),
         Def(
+            "home_ac",
+            "Klimatyzator w domu (Smart Life): status = temperatura w domu, wilgotność, czy działa, ustawiona temperatura i tryb; on / off; set_temp = ustaw temperaturę value (16–31 °C, co 0,5); mode = tryb (value: 0 chłodzenie, 1 grzanie, 2 osuszanie, 3 wentylator, 4 auto); fan = prędkość nawiewu (value = numer z listy w status, od 0). Np. przed powrotem do domu włącz chłodzenie.",
+            mapOf(
+                "action" to mapOf("type" to "string", "enum" to listOf("status", "on", "off", "set_temp", "mode", "fan")),
+                "value" to mapOf("type" to "number", "description" to "set_temp: °C, mode: numer trybu; inaczej 0"),
+            ),
+            listOf("action", "value"),
+        ),
+        Def(
             "radio_control",
             "Obsługa radia i Kokpitu. action: volume_set (value 0–100 %), volume_up, volume_down, mute, unmute, brightness_set (value 0–100 %), idrive_screen (oryginalny ekran BMW iDrive), split_screen (Mapy + YouTube obok siebie), radio_settings (ustawienia radia Witstek), android_settings, home (ekran Kokpitu), theme (value: 0 = Płaski, 1 = BMW iDrive, 2 = M Sport), status (głośność i jasność). Dla akcji bez liczby podaj value 0.",
             mapOf(
@@ -170,6 +179,7 @@ private object AssistantTools {
         "play_youtube" -> playYoutube(act, input.optString("query").trim())
         "media_control" -> mediaControl(act, input.optString("action"))
         "camera_control" -> cameraControl(act, input)
+        "home_ac" -> homeAc(input.optString("action"), input.optDouble("value", 0.0))
         "radio_control" -> radioControl(act, input.optString("action"), input.optInt("value"))
         "open_app" -> openApp(act, input.optString("app").trim(), input.optString("search").trim())
         else -> "Nieznane narzędzie $name"
@@ -260,6 +270,22 @@ private object AssistantTools {
             "zoom" -> call("zoom", name, android.os.Bundle().apply { putDouble("value", amount) })
             else -> "nieznana akcja $action"
         }
+    }
+
+    private fun homeAc(action: String, value: Double): String = kotlinx.coroutines.runBlocking {
+        if (!Tuya.configured) return@runBlocking "Klimatyzator nie jest połączony (Ustawienia → Dom: klucze Tuya)"
+        val r = when (action) {
+            "on" -> Tuya.setPower(true)
+            "off" -> Tuya.setPower(false)
+            "set_temp" -> Tuya.setTarget(value.toFloat())
+            "mode" -> Tuya.setMode(Tuya.MODES.getOrNull(value.toInt())?.first ?: return@runBlocking "Zły numer trybu")
+            "fan" -> Tuya.setFan(Tuya.fanValues.getOrNull(value.toInt()) ?: return@runBlocking "Zły numer nawiewu")
+            else -> "ok"
+        }
+        if (r != "ok") return@runBlocking r
+        val s = Tuya.state.value ?: Tuya.refresh() ?: return@runBlocking Tuya.error.value ?: "Brak odczytu klimatyzatora"
+        "${s.name}: ${if (!s.online) "offline" else if (s.on) "włączony, ${Tuya.modeName(s.mode)}, ustawione ${s.target} °C" else "wyłączony"}; w domu ${s.room ?: "?"} °C, wilgotność ${s.humidity ?: "?"} %" +
+            (if (s.fan != null) "; nawiew ${Tuya.fanName(s.fan)} (lista: ${Tuya.fanValues.mapIndexed { i, v -> "$i ${Tuya.fanName(v)}" }.joinToString()})" else "")
     }
 
     private fun radioControl(act: MainActivity, action: String, value: Int): String {
@@ -357,10 +383,17 @@ private object AssistantTools {
     }
 }
 
-private const val SYSTEM_PROMPT = """Jesteś asystentem w aucie: ekran radia w BMW F11 Touring z launcherem Kokpit F11. Rozmawia z Tobą kierowca albo pasażer.
+private const val BASE_PROMPT = """Jesteś asystentem w aucie: ekran radia w BMW F11 Touring z launcherem Kokpit F11. Rozmawia z Tobą kierowca albo pasażer.
 Odpowiadaj po polsku, krótko i naturalnie, zwykle 1–3 zdaniami – odpowiedzi są czytane na głos, więc pisz zwykłym tekstem, bez list, nagłówków, tabel i znaczników Markdown.
 Kierowca nie powinien czytać długich tekstów w czasie jazdy, dlatego najważniejsze mów na początku.
-Masz narzędzia: car_status (stan auta, położenie, trasa), navigate i open_saved_place (włączają nawigację w Mapach Google), open_app (uruchamia aplikację w radiu i może w niej wyszukać), play_youtube (od razu odtwarza w YouTube to, o co ktoś prosi), media_control (pauza, wznowienie, następny, poprzedni, co teraz gra) i radio_control (głośność, jasność, ekran BMW iDrive, podzielony ekran, ustawienia, wygląd Kokpitu) camera_control (obrót kamery, punkty, zoom) i camera_snapshot (aktualne zdjęcie z kamery Xiaomi – gdy ktoś pyta, co widać na kamerze, zawsze zrób nowe zdjęcie). Gdy ktoś prosi o włączenie muzyki lub filmu, użyj play_youtube. Gdy pytanie dotyczy auta, paliwa, miejsca albo trasy, najpierw sprawdź car_status. Gdy ktoś prosi o trasę, od razu włącz nawigację i krótko to potwierdź."""
+Masz narzędzia: car_status (stan auta, położenie, trasa), navigate i open_saved_place (włączają nawigację w Mapach Google), open_app (uruchamia aplikację w radiu i może w niej wyszukać), play_youtube (od razu odtwarza w YouTube to, o co ktoś prosi), media_control (pauza, wznowienie, następny, poprzedni, co teraz gra) i radio_control (głośność, jasność, ekran BMW iDrive, podzielony ekran, ustawienia, wygląd Kokpitu) camera_control (obrót kamery, punkty, zoom), home_ac (klimatyzator w domu: temperatura, wł./wył., ustawienie) i camera_snapshot (aktualne zdjęcie z kamery Xiaomi – gdy ktoś pyta, co widać na kamerze, zawsze zrób nowe zdjęcie). Gdy ktoś prosi o włączenie muzyki lub filmu, użyj play_youtube. Gdy pytanie dotyczy auta, paliwa, miejsca albo trasy, najpierw sprawdź car_status. Gdy ktoś prosi o trasę, od razu włącz nawigację i krótko to potwierdź."""
+
+/** Prompt systemowy: stały opis roli + instrukcje właściciela z Ustawień (jak się zwracać, styl…). */
+private fun systemPrompt(): String {
+    val own = Prefs.aiInstructions.trim()
+    return if (own.isEmpty()) BASE_PROMPT
+    else "$BASE_PROMPT\n\nInstrukcje od właściciela auta (stosuj je zawsze, chyba że przeczą bezpieczeństwu w czasie jazdy):\n$own"
+}
 
 /** Rozmowa z jednym dostawcą; trzyma całą historię, żeby asystent pamiętał kontekst. */
 private interface ChatEngine {
@@ -395,7 +428,7 @@ private class ClaudeEngine(private val act: MainActivity, apiKey: String, privat
             val params = MessageCreateParams.builder()
                 .model(model)
                 .maxTokens(16000L)
-                .system(SYSTEM_PROMPT)
+                .system(systemPrompt())
                 .messages(history.toList())
                 .outputConfig(OutputConfig.builder().effort(OutputConfig.Effort.LOW).build())
                 .apply { tools.forEach { addTool(it) } }
@@ -442,7 +475,7 @@ private class ClaudeEngine(private val act: MainActivity, apiKey: String, privat
 
 /** OpenAI: Chat Completions przez zwykłe HTTPS (bez dodatkowej biblioteki). */
 private class OpenAiEngine(private val act: MainActivity, private val apiKey: String, private val model: String) : ChatEngine {
-    private val history = JSONArray().put(JSONObject().put("role", "system").put("content", SYSTEM_PROMPT))
+    private val history = JSONArray().put(JSONObject().put("role", "system").put("content", systemPrompt()))
 
     private val tools = JSONArray().apply {
         AssistantTools.all.forEach { t ->
@@ -540,7 +573,7 @@ object Assistant {
         val p = Prefs.aiProvider
         val key = if (p == OPENAI) Prefs.openaiKey else Prefs.anthropicKey
         val model = if (p == OPENAI) Prefs.openaiModel else Prefs.anthropicModel
-        val id = "$p|$key|$model"
+        val id = "$p|$key|$model|${Prefs.aiInstructions.hashCode()}"
         if (engine == null || id != engineKey) {
             engine = if (p == OPENAI) OpenAiEngine(act, key, model) else ClaudeEngine(act, key, model)
             engineKey = id

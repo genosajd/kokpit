@@ -46,6 +46,9 @@ import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.ViewWeek
+import androidx.compose.material.icons.outlined.AcUnit
+import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.Check
@@ -184,6 +187,7 @@ fun SettingsDialog(
     onAiField: (AiField) -> Unit,
     onVoices: () -> Unit,
     onCustom: (CustomField) -> Unit,
+    onInstructions: () -> Unit,
     onDemo: (Boolean) -> Unit,
     onResetShortcuts: () -> Unit,
 ) {
@@ -223,7 +227,7 @@ fun SettingsDialog(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("Kokpit F11 0.3.8", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
+                Text("Kokpit F11 0.3.9", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
             }
             Spacer(Modifier.width(d(26)))
             LazyVerticalGrid(
@@ -276,6 +280,16 @@ fun SettingsDialog(
                 if (!locOn) item { SettingTile(Icons.Outlined.MyLocation, "Lokalizacja", "Potrzebna do prędkości i pogody", on = false) { act.requestLocation() } }
                     }
                     2 -> {
+                item {
+                    val n = GridPages.count.intValue
+                    SettingTile(Icons.Outlined.ViewWeek, "Strony ekranu: $n", if (n == 1) "Dotknij, aby dodać stronę po prawej (przewijanie w bok)" else "Przewijanie w bok; dotknij, aby zmienić (1–3)") {
+                        val next = if (n >= 3) 1 else n + 1
+                        GridPages.count.intValue = next
+                        Prefs.gridPages = next
+                        // bloki z usuniętych stron znikają (można je dodać ponownie w edycji)
+                        act.saveLayout(act.layout.value.filter { it.inBounds })
+                    }
+                }
                 item { SettingTile(Icons.Outlined.DashboardCustomize, "Edytuj układ bloków", "Przesuwanie, rozmiar, ukrywanie – tylko na postoju") { onEditLayout() } }
                 item { SettingTile(Icons.Outlined.RestartAlt, "Przywróć domyślne skróty", "Zastępuje obecne skróty") { onResetShortcuts(); onClose() } }
                     }
@@ -318,6 +332,23 @@ fun SettingsDialog(
                 item { SettingTile(Icons.Outlined.DirectionsCar, "Model 3D: białe F11", "Wbudowany model, obracany palcem") { act.restoreCarModel() } }
                 if (model.isNotBlank()) item { SettingTile(Icons.Outlined.Delete, "Usuń model 3D", "Wróci zdjęcie auta") { act.removeCarModel() } }
                     }
+                    8 -> {
+                item {
+                    SettingTile(Icons.Outlined.Key, "Tuya Access ID", if (Prefs.tuyaId.isBlank()) "Nie wpisano – platform.tuya.com, projekt „Kokpit F11”" else "Wpisany: …" + Prefs.tuyaId.takeLast(4), on = Prefs.tuyaId.isNotBlank()) {
+                        onAiField(AiField.TUYA_ID)
+                    }
+                }
+                item {
+                    SettingTile(Icons.Outlined.Key, "Tuya Access Secret", if (Prefs.tuyaSecret.isBlank()) "Nie wpisano" else "Wpisany: …" + Prefs.tuyaSecret.takeLast(4), on = Prefs.tuyaSecret.isNotBlank()) {
+                        onAiField(AiField.TUYA_SECRET)
+                    }
+                }
+                item {
+                    SettingTile(Icons.Outlined.AcUnit, "Klimatyzator", Prefs.tuyaDeviceName.ifBlank { if (Tuya.configured) "Wykryty przy pierwszym odczycie" else "Najpierw klucze Tuya" }) {
+                        Tuya.reset()
+                    }
+                }
+                    }
                     7 -> {
                 val claude = aiProvider == Assistant.ANTHROPIC
                 item {
@@ -337,6 +368,11 @@ fun SettingsDialog(
                     SettingTile(Icons.Outlined.Tune, "Model", if (claude) Prefs.anthropicModel else Prefs.openaiModel) {
                         onAiField(if (claude) AiField.ANTHROPIC_MODEL else AiField.OPENAI_MODEL)
                     }
+                }
+                item {
+                    val own = Prefs.aiInstructions.trim()
+                    SettingTile(Icons.Outlined.EditNote, "Instrukcje dla asystenta",
+                        if (own.isEmpty()) "Np. jak ma się do Ciebie zwracać, jakim tonem mówić" else own.replace('\n', ' ').take(80)) { onInstructions() }
                 }
                 item {
                     SettingTile(Icons.Outlined.RecordVoiceOver, "Czytaj odpowiedzi na głos", if (aiSpeak) "Odpowiedzi czytane po polsku" else "Odpowiedzi tylko na ekranie", on = aiSpeak) {
@@ -366,6 +402,7 @@ private val SETTINGS_GROUPS = listOf(
         "Kamera" to Icons.Outlined.Videocam,
         "Auto" to Icons.Outlined.DirectionsCar,
         "Asystent AI" to Icons.Outlined.SmartToy,
+        "Dom (Smart Life)" to Icons.Outlined.AcUnit,
 )
 
 /** Kafelek ustawienia: ikona, tytuł, opis; `on` pokazuje stan przełącznika (Wł./Wył.). */
@@ -588,12 +625,44 @@ fun VoicePickerDialog(act: MainActivity, onClose: () -> Unit) {
     }
 }
 
+/** Własne instrukcje dla asystenta – dopisywane do promptu systemowego przy każdej rozmowie. */
+@Composable
+fun InstructionsDialog(onClose: () -> Unit) {
+    var text by remember { mutableStateOf(Prefs.aiInstructions) }
+    AlertDialog(
+        onDismissRequest = onClose,
+        containerColor = CardBg,
+        title = { Text("Instrukcje dla asystenta", color = Txt) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(d(12))) {
+                OutlinedTextField(
+                    text, { text = it }, minLines = 4, maxLines = 8,
+                    modifier = Modifier.width(d(1100)),
+                    placeholder = { Text("Np.: Zwracaj się do mnie po imieniu: … Mów krótko i z humorem. „Praca Gabi” to praca …") },
+                )
+                Text("Asystent stosuje to w każdej rozmowie (Claude i OpenAI). Zapis zaczyna nową rozmowę.", color = Dim, fontSize = s(18))
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                Prefs.aiInstructions = text.trim()
+                Assistant.reset()
+                onClose()
+            }) { Text("Zapisz") }
+        },
+        dismissButton = { TextButton(onClick = onClose) { Text("Anuluj") } },
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    )
+}
+
 /** Pola asystenta wpisywane w okienku. */
 enum class AiField(val title: String, val hint: String, val secret: Boolean) {
     ANTHROPIC_KEY("Klucz API Anthropic", "sk-ant-…", true),
     OPENAI_KEY("Klucz API OpenAI", "sk-…", true),
     ANTHROPIC_MODEL("Model Claude", Assistant.DEFAULT_CLAUDE_MODEL, false),
     OPENAI_MODEL("Model OpenAI", Assistant.DEFAULT_OPENAI_MODEL, false),
+    TUYA_ID("Tuya Access ID", "z projektu na platform.tuya.com", false),
+    TUYA_SECRET("Tuya Access Secret", "z projektu na platform.tuya.com", true),
 }
 
 /** Wpisanie klucza API albo nazwy modelu asystenta; puste pole modelu = domyślny. */
@@ -606,6 +675,8 @@ fun AiFieldDialog(field: AiField, onClose: () -> Unit) {
                 AiField.OPENAI_KEY -> Prefs.openaiKey
                 AiField.ANTHROPIC_MODEL -> Prefs.anthropicModel
                 AiField.OPENAI_MODEL -> Prefs.openaiModel
+                AiField.TUYA_ID -> Prefs.tuyaId
+                AiField.TUYA_SECRET -> Prefs.tuyaSecret
             }
         )
     }
@@ -625,8 +696,11 @@ fun AiFieldDialog(field: AiField, onClose: () -> Unit) {
                     visualTransformation = if (field.secret) androidx.compose.ui.text.input.PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
                 )
                 Text(
-                    if (field.secret) "Klucz zostaje tylko w radiu. Za zapytania płacisz u dostawcy według zużycia."
-                    else "Puste pole = model domyślny (${field.hint}).",
+                    when {
+                        field == AiField.TUYA_ID || field == AiField.TUYA_SECRET -> "Projekt „Kokpit F11” → Overview → Authorization Key. Zostaje tylko w radiu."
+                        field.secret -> "Klucz zostaje tylko w radiu. Za zapytania płacisz u dostawcy według zużycia."
+                        else -> "Puste pole = model domyślny (${field.hint})."
+                    },
                     color = Dim, fontSize = s(18),
                 )
             }
@@ -638,6 +712,8 @@ fun AiFieldDialog(field: AiField, onClose: () -> Unit) {
                     AiField.OPENAI_KEY -> Prefs.openaiKey = text
                     AiField.ANTHROPIC_MODEL -> Prefs.anthropicModel = text
                     AiField.OPENAI_MODEL -> Prefs.openaiModel = text
+                    AiField.TUYA_ID -> { Prefs.tuyaId = text; Tuya.reset() }
+                    AiField.TUYA_SECRET -> { Prefs.tuyaSecret = text; Tuya.reset() }
                 }
                 Assistant.reset()
                 onClose()

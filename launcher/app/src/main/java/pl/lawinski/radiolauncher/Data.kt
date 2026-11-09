@@ -93,6 +93,25 @@ object Prefs {
         get() = sp.getString("theme", "flat") ?: "flat"
         set(v) = sp.edit().putString("theme", v).apply()
 
+    /** Klimatyzator Smart Life przez chmurę Tuya (Tuya.kt) */
+    var tuyaId: String
+        get() = sp.getString("tuya_id", "") ?: ""
+        set(v) = sp.edit().putString("tuya_id", v).apply()
+    var tuyaSecret: String
+        get() = sp.getString("tuya_secret", "") ?: ""
+        set(v) = sp.edit().putString("tuya_secret", v).apply()
+    var tuyaDevice: String
+        get() = sp.getString("tuya_device", "") ?: ""
+        set(v) = sp.edit().putString("tuya_device", v).apply()
+    var tuyaDeviceName: String
+        get() = sp.getString("tuya_device_name", "") ?: ""
+        set(v) = sp.edit().putString("tuya_device_name", v).apply()
+
+    /** Liczba stron ekranu głównego (1–3), przewijanych w bok */
+    var gridPages: Int
+        get() = sp.getInt("grid_pages", 1)
+        set(v) = sp.edit().putInt("grid_pages", v).apply()
+
     /** Tryb jasny (false = ciemny) */
     var lightMode: Boolean
         get() = sp.getBoolean("light_mode", false)
@@ -131,6 +150,10 @@ object Prefs {
     var openaiTtsModel: String
         get() = sp.getString("openai_tts_model", "")?.ifBlank { null } ?: Speech.DEFAULT_OPENAI_TTS_MODEL
         set(v) = sp.edit().putString("openai_tts_model", v).apply()
+    /** Własne instrukcje dla asystenta (dopisywane do promptu systemowego) */
+    var aiInstructions: String
+        get() = sp.getString("ai_instructions", "") ?: ""
+        set(v) = sp.edit().putString("ai_instructions", v).apply()
     var aiSpeak: Boolean
         get() = sp.getBoolean("ai_speak", true)
         set(v) = sp.edit().putBoolean("ai_speak", v).apply()
