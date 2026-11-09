@@ -93,6 +93,15 @@ object Prefs {
         get() = sp.getString("theme", "flat") ?: "flat"
         set(v) = sp.edit().putString("theme", v).apply()
 
+    /** Tryb jasny (false = ciemny) */
+    var lightMode: Boolean
+        get() = sp.getBoolean("light_mode", false)
+        set(v) = sp.edit().putBoolean("light_mode", v).apply()
+
+    /** Własne kolory i pismo dla wyglądu (JSON, ThemeCustom); null = bez zmian */
+    fun themeCustom(id: String): String? = sp.getString("custom_$id", null)
+    fun setThemeCustom(id: String, json: String?) = sp.edit().apply { if (json == null) remove("custom_$id") else putString("custom_$id", json) }.apply()
+
     /** Asystent AI: dostawca (Assistant.ANTHROPIC / OPENAI), klucze API, modele, czytanie odpowiedzi */
     var aiProvider: String
         get() = sp.getString("ai_provider", Assistant.ANTHROPIC) ?: Assistant.ANTHROPIC

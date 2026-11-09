@@ -46,6 +46,13 @@ import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.LightMode
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.FormatSize
+import androidx.compose.material.icons.outlined.TextFields
+import androidx.compose.material.icons.outlined.Wallpaper
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.RecordVoiceOver
@@ -176,6 +183,7 @@ fun SettingsDialog(
     onEditLayout: () -> Unit,
     onAiField: (AiField) -> Unit,
     onVoices: () -> Unit,
+    onCustom: (CustomField) -> Unit,
     onDemo: (Boolean) -> Unit,
     onResetShortcuts: () -> Unit,
 ) {
@@ -215,7 +223,7 @@ fun SettingsDialog(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("Kokpit F11 0.3.7", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
+                Text("Kokpit F11 0.3.8", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
             }
             Spacer(Modifier.width(d(26)))
             LazyVerticalGrid(
@@ -232,6 +240,34 @@ fun SettingsDialog(
                         Prefs.theme = t.id
                     }
                 }
+                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(d(14)), modifier = Modifier.padding(top = d(6))) {
+                        listOf(false to "Ciemny", true to "Jasny").forEach { (light, label) ->
+                            val on = LightMode.on == light
+                            Row(
+                                Modifier.kokpitSurface(d(18), active = on).combinedClickable(onClick = { LightMode.set(light) })
+                                    .padding(horizontal = d(26), vertical = d(16)),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(if (light) Icons.Outlined.LightMode else Icons.Outlined.DarkMode, null,
+                                    tint = if (on) LocalTheme.current.activeText else Accent, modifier = Modifier.size(d(30)))
+                                Spacer(Modifier.width(d(12)))
+                                Text("Tryb $label".lowercase().replaceFirstChar { it.uppercase() }, color = if (on) LocalTheme.current.activeText else Txt, fontSize = s(22))
+                            }
+                        }
+                    }
+                }
+                val c = ThemeCustoms.current()
+                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                    Text("Dostosuj: ${themeState.value.name}", color = Txt, fontSize = s(24), fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = d(14)))
+                }
+                fun colorSub(v: Long?) = if (v == null) "Jak w wyglądzie" else "Własny kolor"
+                item { SettingTile(Icons.Outlined.AutoAwesome, "Kolor poświaty", colorSub(c.glow) + " – tło, krawędzie, blask pod autem") { onCustom(CustomField.GLOW) } }
+                item { SettingTile(Icons.Outlined.Wallpaper, "Kolor tła", colorSub(c.screen)) { onCustom(CustomField.SCREEN) } }
+                item { SettingTile(Icons.Outlined.Palette, "Kolor akcentu", colorSub(c.accent) + " – zaznaczenie, przyciski, ikony") { onCustom(CustomField.ACCENT) } }
+                item { SettingTile(Icons.Outlined.TextFields, "Krój pisma", Fonts.all.firstOrNull { it.first == c.font }?.second ?: "Domyślny") { onCustom(CustomField.FONT) } }
+                item { SettingTile(Icons.Outlined.FormatSize, "Rozmiar pisma", "${(c.fontScale * 100).toInt()} %") { onCustom(CustomField.SIZE) } }
+                if (!c.isDefault) item { SettingTile(Icons.Outlined.RestartAlt, "Przywróć wygląd", "Usuwa zmiany dla „${themeState.value.name}”") { ThemeCustoms.set(themeState.value.id, ThemeCustom()) } }
                     }
                     1 -> {
                 item { SettingTile(Icons.Outlined.Tune, "Ustawienia radia Witstek", "Dźwięk, system, nawigacja; fabryczne z PIN-em 8888") { openRadioSettings(act) } }
@@ -430,6 +466,75 @@ fun AddressDialog(work: Boolean, onClose: () -> Unit) {
         },
         dismissButton = { TextButton(onClick = onClose) { Text("Anuluj") } },
     )
+}
+
+/** Co zmienia okienko Dostosuj. */
+enum class CustomField(val title: String) {
+    GLOW("Kolor poświaty"), SCREEN("Kolor tła"), ACCENT("Kolor akcentu"), FONT("Krój pisma"), SIZE("Rozmiar pisma"),
+}
+
+/** Dostosuj bieżący wygląd: kolor (próbki), krój albo rozmiar pisma; zmiana widać od razu. */
+@Composable
+fun CustomizeDialog(field: CustomField, onClose: () -> Unit) {
+    val id = themeState.value.id
+    val c = ThemeCustoms.current()
+    fun save(n: ThemeCustom) = ThemeCustoms.set(id, n)
+    Sheet(field.title + " · " + themeState.value.name, onClose) {
+        when (field) {
+            CustomField.GLOW, CustomField.SCREEN, CustomField.ACCENT -> {
+                val current = when (field) { CustomField.GLOW -> c.glow; CustomField.SCREEN -> c.screen; else -> c.accent }
+                val list = if (field == CustomField.SCREEN) Swatches.dark else Swatches.bright
+                fun pick(v: Long?) = save(when (field) {
+                    CustomField.GLOW -> c.copy(glow = v)
+                    CustomField.SCREEN -> c.copy(screen = v)
+                    else -> c.copy(accent = v)
+                })
+                LazyVerticalGrid(GridCells.Adaptive(d(150)), verticalArrangement = Arrangement.spacedBy(d(18)), horizontalArrangement = Arrangement.spacedBy(d(18))) {
+                    item {
+                        Swatch(null, current == null, "Z wyglądu") { pick(null) }
+                    }
+                    items(list.size) { i -> Swatch(list[i], current == list[i], null) { pick(list[i]) } }
+                }
+            }
+            CustomField.FONT -> LazyVerticalGrid(GridCells.Adaptive(d(440)), verticalArrangement = Arrangement.spacedBy(d(14)), horizontalArrangement = Arrangement.spacedBy(d(14))) {
+                items(Fonts.all.size) { i ->
+                    val (key, label) = Fonts.all[i]
+                    val on = c.font == key
+                    Column(
+                        Modifier.fillMaxWidth().kokpitSurface(d(18), active = on).combinedClickable(onClick = { save(c.copy(font = key)) }).padding(d(20)),
+                    ) {
+                        Text(label, color = if (on) LocalTheme.current.activeText else Txt, fontSize = s(26), fontFamily = Fonts.family(key) ?: androidx.compose.ui.text.font.FontFamily.Default)
+                        Text("Zażółć gęślą jaźń 12:45", color = if (on) LocalTheme.current.activeText else Dim, fontSize = s(20), fontFamily = Fonts.family(key) ?: androidx.compose.ui.text.font.FontFamily.Default)
+                    }
+                }
+            }
+            CustomField.SIZE -> LazyVerticalGrid(GridCells.Adaptive(d(260)), verticalArrangement = Arrangement.spacedBy(d(14)), horizontalArrangement = Arrangement.spacedBy(d(14))) {
+                val sizes = listOf(0.85f, 0.92f, 1f, 1.08f, 1.15f, 1.25f, 1.35f)
+                items(sizes.size) { i ->
+                    val v = sizes[i]
+                    val on = kotlin.math.abs(c.fontScale - v) < 0.01f
+                    Box(
+                        Modifier.fillMaxWidth().height(d(120)).kokpitSurface(d(18), active = on).combinedClickable(onClick = { save(c.copy(fontScale = v)) }),
+                        contentAlignment = Alignment.Center,
+                    ) { Text("${(v * 100).toInt()} %", color = if (on) LocalTheme.current.activeText else Txt, fontSize = s(28)) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Swatch(color: Long?, selected: Boolean, label: String?, onClick: () -> Unit) {
+    Box(
+        Modifier.fillMaxWidth().height(d(110)).clip(RoundedCornerShape(d(20)))
+            .background(if (color != null) Color(color) else CardHi)
+            .border(if (selected) d(5) else 1.dp, if (selected) Txt else Line, RoundedCornerShape(d(20)))
+            .combinedClickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (label != null) Text(label, color = Txt, fontSize = s(20))
+        else if (selected) Icon(Icons.Outlined.Check, null, tint = if (Color(color!!).let { it.red + it.green + it.blue } > 1.8f) Color.Black else Color.White, modifier = Modifier.size(d(44)))
+    }
 }
 
 /** Wybór głosu odpowiedzi: polskie głosy systemowe (Google) albo głosy OpenAI, z odsłuchem. */

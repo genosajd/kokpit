@@ -130,13 +130,15 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-val Bg = Color(0xFF07090D)
-val CardBg = Color(0xFF11161E)
-val CardHi = Color(0xFF161D27)
-val Line = Color(0x12FFFFFF)
-val Txt = Color(0xFFEEF2F7)
-val Dim = Color(0xFF8A96A8)
-val Accent = Color(0xFF4DA3FF)
+// kolory zależne od trybu jasny/ciemny (LightMode); odczyt w kompozycji = przerysowanie po zmianie
+val Bg: Color get() = if (LightMode.on) Color(0xFFE9EEF4) else Color(0xFF07090D)
+val CardBg: Color get() = if (LightMode.on) Color(0xFFFFFFFF) else Color(0xFF11161E)
+val CardHi: Color get() = if (LightMode.on) Color(0xFFEDF1F6) else Color(0xFF161D27)
+val Line: Color get() = if (LightMode.on) Color(0x1A000000) else Color(0x12FFFFFF)
+val Txt: Color get() = if (LightMode.on) Color(0xFF111824) else Color(0xFFEEF2F7)
+val Dim: Color get() = if (LightMode.on) Color(0xFF5A6678) else Color(0xFF8A96A8)
+/** Kolor akcentu: z Dostosuj, inaczej niebieski. Odczyt w kompozycji = przerysowanie po zmianie. */
+val Accent: Color get() = Color(ThemeCustoms.current().accent ?: DEFAULT_ACCENT)
 val Warn = Color(0xFFFFB547)
 
 /** Jednostka projektu: ekran zaprojektowany jest na 2560×720, a ta wartość przelicza go na dp tego ekranu. */
@@ -146,7 +148,7 @@ val LocalU = staticCompositionLocalOf { 1.dp }
 fun d(n: Number): Dp = LocalU.current * n.toFloat()
 
 @Composable
-fun s(n: Number): TextUnit = with(LocalDensity.current) { (LocalU.current * n.toFloat()).toSp() }
+fun s(n: Number): TextUnit = with(LocalDensity.current) { (LocalU.current * n.toFloat() * LocalFontScale.current).toSp() }
 
 /** Okna otwierane nad ekranem głównym. */
 sealed interface Dlg {
@@ -157,6 +159,7 @@ sealed interface Dlg {
     data object Place3 : Dlg
     data class Ai(val field: AiField) : Dlg
     data object Voices : Dlg
+    data class Custom(val field: CustomField) : Dlg
     data object Cameras : Dlg
     /** wybór widżetu do klocka „Widżet” nr n */
     data class Widgets(val n: Int) : Dlg
@@ -200,10 +203,15 @@ fun LauncherScreen(act: MainActivity) {
         shortcuts = list
     }
 
-    val theme = themeState.value
+    val theme = effectiveTheme()
+    val custom = ThemeCustoms.current()
     val animate = theme.animated && act.visible.value && !edit
-    MaterialTheme(colorScheme = darkColorScheme(primary = Accent, surface = CardBg, background = Bg)) {
-      CompositionLocalProvider(LocalTheme provides theme, LocalAnimate provides animate) {
+    MaterialTheme(colorScheme = if (LightMode.on) androidx.compose.material3.lightColorScheme(primary = Accent, surface = CardBg, background = Bg)
+        else darkColorScheme(primary = Accent, surface = CardBg, background = Bg)) {
+      CompositionLocalProvider(
+          LocalTheme provides theme, LocalAnimate provides animate, LocalFontScale provides custom.fontScale,
+          androidx.compose.material3.LocalTextStyle provides androidx.compose.material3.LocalTextStyle.current.copy(fontFamily = Fonts.family(custom.font)),
+      ) {
         BoxWithConstraints(
             Modifier.fillMaxSize().background(theme.screen)
                 .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.displayCutout))
@@ -260,6 +268,7 @@ fun LauncherScreen(act: MainActivity) {
                         onPlace3 = { dialog = Dlg.Place3 },
                         onAiField = { dialog = Dlg.Ai(it) },
                         onVoices = { dialog = Dlg.Voices },
+                        onCustom = { dialog = Dlg.Custom(it) },
                         onCameras = { dialog = Dlg.Cameras },
                         onEditLayout = { dialog = null; edit = true },
                         onDemo = { demo = it },
@@ -284,6 +293,7 @@ fun LauncherScreen(act: MainActivity) {
                     is Dlg.Place3 -> Place3Dialog(onClose = { dialog = null })
                     is Dlg.Ai -> AiFieldDialog(dl.field, onClose = { dialog = Dlg.Settings })
                     is Dlg.Voices -> VoicePickerDialog(act, onClose = { dialog = Dlg.Settings })
+                    is Dlg.Custom -> CustomizeDialog(dl.field, onClose = { dialog = Dlg.Settings })
                     is Dlg.Cameras -> CameraPickerDialog(act, onClose = { dialog = null })
                     is Dlg.Widgets -> WidgetPickerDialog(act, onClose = { dialog = null }) { provider ->
                         dialog = null
@@ -650,7 +660,7 @@ fun Tile(
             .then(
                 when {
                     highlight -> Modifier.border(3.dp, Accent, RoundedCornerShape(d(20)))
-                    dashed -> Modifier.border(2.dp, Color(0x26FFFFFF), RoundedCornerShape(d(20)))
+                    dashed -> Modifier.border(2.dp, if (LightMode.on) Color(0x33000000) else Color(0x26FFFFFF), RoundedCornerShape(d(20)))
                     else -> Modifier
                 }
             )
@@ -667,7 +677,7 @@ fun Tile(
         if (bitmap != null) {
             Image(bitmap, label, Modifier.size(d(80)))
         } else {
-            Box(Modifier.size(d(80)).clip(RoundedCornerShape(d(20))).background(if (dashed) Color.Transparent else Color(0xFF2B3340)), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(d(80)).clip(RoundedCornerShape(d(20))).background(if (dashed) Color.Transparent else if (LightMode.on) Color(0xFFDDE4EE) else Color(0xFF2B3340)), contentAlignment = Alignment.Center) {
                 Icon(fallback, null, tint = if (dashed) Dim else Txt, modifier = Modifier.size(d(46)))
             }
         }
@@ -922,12 +932,11 @@ fun CameraBlock(modifier: Modifier, act: MainActivity, onChoose: () -> Unit) {
                 LiveCameraView(live, onProblem = { problem = it }, onState = { playing = it })
                 Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x8C000000), Color.Transparent, Color.Transparent, Color(0x99000000)))))
                 Row(Modifier.fillMaxWidth().padding(horizontal = d(24), vertical = d(18)), verticalAlignment = Alignment.CenterVertically) {
-                    Text(live, color = Txt, fontSize = s(24), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                    val blink = if (playing && LocalAnimate.current) loop(900) else null
-                    Text(
-                        if (playing) "● NA ŻYWO" else "łączenie…",
-                        color = if (playing) Color(0xFFFF4D5E) else Dim, fontSize = s(18), fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.graphicsLayer { alpha = 1f - 0.55f * (blink?.value ?: 0f) }.clip(RoundedCornerShape(d(10))).background(Color(0x73000000)).padding(horizontal = d(12), vertical = d(6)),
+                    Text(live, color = Color(0xFFEEF2F7), fontSize = s(24), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    // bez znaczka „na żywo” (użytkownik uznał go za zbędny); tylko stan łączenia
+                    if (!playing) Text(
+                        "łączenie…", color = Dim, fontSize = s(18), fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clip(RoundedCornerShape(d(10))).background(Color(0x73000000)).padding(horizontal = d(12), vertical = d(6)),
                     )
                 }
                 if (!playing) {
@@ -942,12 +951,12 @@ fun CameraBlock(modifier: Modifier, act: MainActivity, onChoose: () -> Unit) {
                 if (list.size > 1) {
                     val i = list.indexOf(live).coerceAtLeast(0)
                     Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(d(16)), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Outlined.ChevronLeft, "Poprzednia", tint = Txt,
+                        Icon(Icons.Outlined.ChevronLeft, "Poprzednia", tint = Color(0xFFEEF2F7),
                             modifier = Modifier.size(d(52)).combinedClickable(onClick = { act.setLiveCamera(list[(i - 1 + list.size) % list.size]) }))
                         Spacer(Modifier.weight(1f))
-                        Text("${i + 1} / ${list.size}", color = Dim, fontSize = s(20))
+                        Text("${i + 1} / ${list.size}", color = Color(0xFFB8C2D0), fontSize = s(20))
                         Spacer(Modifier.weight(1f))
-                        Icon(Icons.Outlined.ChevronRight, "Następna", tint = Txt,
+                        Icon(Icons.Outlined.ChevronRight, "Następna", tint = Color(0xFFEEF2F7),
                             modifier = Modifier.size(d(52)).combinedClickable(onClick = { act.setLiveCamera(list[(i + 1) % list.size]) }))
                     }
                 }

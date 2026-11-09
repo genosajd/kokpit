@@ -132,3 +132,168 @@ object Themes {
 val themeState by lazy { mutableStateOf(Themes.byId(Prefs.theme)) }
 
 val LocalTheme = compositionLocalOf { Themes.FLAT }
+
+/*
+ * Własne zmiany wyglądu (Ustawienia → Wygląd → Dostosuj), osobno dla każdego wyglądu.
+ * Puste pole = kolor albo pismo z wyglądu. Zapis: Prefs "custom_<id>" jako JSON.
+ */
+data class ThemeCustom(
+    /** poświata w tle, światło na krawędziach i blask pod autem */
+    val glow: Long? = null,
+    /** tło całego ekranu (u góry; w dół ciemnieje) */
+    val screen: Long? = null,
+    /** zaznaczenie pokrętłem, włączone przyciski, ikony */
+    val accent: Long? = null,
+    /** krój pisma: klucz z [Fonts] */
+    val font: String = "",
+    /** rozmiar pisma, 1.0 = 100 % */
+    val fontScale: Float = 1f,
+) {
+    val isDefault get() = this == ThemeCustom()
+
+    fun toJson(): String = org.json.JSONObject().apply {
+        glow?.let { put("glow", it) }
+        screen?.let { put("screen", it) }
+        accent?.let { put("accent", it) }
+        if (font.isNotEmpty()) put("font", font)
+        if (fontScale != 1f) put("fontScale", fontScale.toDouble())
+    }.toString()
+
+    companion object {
+        fun fromJson(s: String?): ThemeCustom = try {
+            val o = org.json.JSONObject(s ?: "{}")
+            ThemeCustom(
+                o.optLong("glow").takeIf { o.has("glow") },
+                o.optLong("screen").takeIf { o.has("screen") },
+                o.optLong("accent").takeIf { o.has("accent") },
+                o.optString("font"),
+                o.optDouble("fontScale", 1.0).toFloat(),
+            )
+        } catch (_: Exception) {
+            ThemeCustom()
+        }
+    }
+}
+
+object ThemeCustoms {
+    private val cache = HashMap<String, ThemeCustom>()
+
+    /** Zmienia się przy każdym zapisie – ekran od razu się przerysowuje. */
+    val version = androidx.compose.runtime.mutableIntStateOf(0)
+
+    fun get(id: String): ThemeCustom = cache.getOrPut(id) { ThemeCustom.fromJson(Prefs.themeCustom(id)) }
+
+    fun set(id: String, c: ThemeCustom) {
+        cache[id] = c
+        Prefs.setThemeCustom(id, if (c.isDefault) null else c.toJson())
+        version.intValue++
+    }
+
+    /** Bieżące zmiany wyglądu (odczyt w kompozycji – przerysowanie po zmianie). */
+    fun current(): ThemeCustom {
+        version.intValue
+        return get(themeState.value.id)
+    }
+}
+
+/** Kroje pisma dostępne w Androidzie bez pobierania. */
+object Fonts {
+    val all = listOf(
+        "" to "Domyślny (Roboto)",
+        "light" to "Roboto Light",
+        "medium" to "Roboto Medium",
+        "condensed" to "Roboto Condensed",
+        "serif" to "Szeryfowy",
+        "mono" to "Maszynowy",
+        "casual" to "Odręczny",
+    )
+
+    fun family(key: String): androidx.compose.ui.text.font.FontFamily? = when (key) {
+        "light" -> androidx.compose.ui.text.font.FontFamily(android.graphics.Typeface.create("sans-serif-light", android.graphics.Typeface.NORMAL))
+        "medium" -> androidx.compose.ui.text.font.FontFamily(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL))
+        "condensed" -> androidx.compose.ui.text.font.FontFamily(android.graphics.Typeface.create("sans-serif-condensed", android.graphics.Typeface.NORMAL))
+        "serif" -> androidx.compose.ui.text.font.FontFamily.Serif
+        "mono" -> androidx.compose.ui.text.font.FontFamily.Monospace
+        "casual" -> androidx.compose.ui.text.font.FontFamily(android.graphics.Typeface.create("casual", android.graphics.Typeface.NORMAL))
+        else -> null
+    }
+}
+
+/** Kolory do wyboru w Dostosuj. */
+object Swatches {
+    val bright = listOf(
+        0xFF1C69D4, 0xFF4DA3FF, 0xFF00C2FF, 0xFF00BFA5, 0xFF3DDC84, 0xFFA6E22E, 0xFFFFD54F, 0xFFFF8A3D,
+        0xFFE0283C, 0xFFFF4D8D, 0xFF8E5CFF, 0xFF5B5BFF, 0xFFE8EEF5, 0xFF9FB3CC,
+    )
+    val dark = listOf(
+        0xFF0F1A2C, 0xFF0A2342, 0xFF0B2A30, 0xFF0B2018, 0xFF1B0F2E, 0xFF2A0A12, 0xFF241A12, 0xFF1A1D22,
+        0xFF101318, 0xFF050608, 0xFF16090B, 0xFF1F2A3A,
+    )
+}
+
+private fun Color.dim(f: Float) = Color(red * f, green * f, blue * f, alpha)
+
+/** Wygląd z nałożonymi zmianami użytkownika. */
+fun KokpitTheme.customized(c: ThemeCustom): KokpitTheme {
+    var t = this
+    c.glow?.let { Color(it) }?.let { g ->
+        t = t.copy(
+            aurora = g.copy(alpha = 0.32f) to g.dim(0.8f).copy(alpha = 0.18f),
+            sweep = Color(minOf(1f, g.red * 0.6f + 0.4f), minOf(1f, g.green * 0.6f + 0.4f), minOf(1f, g.blue * 0.6f + 0.4f), 0.9f),
+            glow = g.copy(alpha = 0.22f),
+            carBack = Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent, g.copy(alpha = 0.18f))),
+        )
+    }
+    c.screen?.let { Color(it) }?.let { b ->
+        t = t.copy(screen = Brush.verticalGradient(listOf(b, b.dim(0.45f), Color(0xFF030406))))
+    }
+    c.accent?.let { Color(it) }?.let { a ->
+        val light = a.red * 0.3f + a.green * 0.59f + a.blue * 0.11f > 0.7f
+        t = t.copy(
+            selected = Brush.verticalGradient(listOf(a.copy(alpha = 0.35f), a.copy(alpha = 0.22f), a.copy(alpha = 0.13f))),
+            selectedRing = a.copy(alpha = 0.75f),
+            active = Brush.verticalGradient(listOf(a, a.dim(0.7f))),
+            activeText = if (light) Color(0xFF0B0E13) else Color.White,
+        )
+    }
+    return t
+}
+
+/** Tryb jasny / ciemny – wspólny dla wszystkich wyglądów (Ustawienia → Wygląd). */
+object LightMode {
+    val state by lazy { androidx.compose.runtime.mutableStateOf(Prefs.lightMode) }
+    val on: Boolean get() = state.value
+
+    fun set(v: Boolean) {
+        state.value = v
+        Prefs.lightMode = v
+    }
+}
+
+/**
+ * Jasna wersja wyglądu: jasne tła bloków i kafelków, ciemne krawędzie; akcent, poświata
+ * i paliwo zostają z wyglądu (albo z Dostosuj).
+ */
+fun KokpitTheme.light(): KokpitTheme = copy(
+    screen = v(0xFFF4F7FB, 0xFFE3E9F1, 0xFFD5DDE8),
+    block = v(0xFFFFFFFF, 0xFFF6F8FB, 0xFFEEF2F7),
+    blockEdge = v(0x26000000, 0x0F000000, 0x1F000000),
+    surface = v(0xFFF7F9FC, 0xFFEDF1F6, 0xFFE5EAF1),
+    surfaceEdge = if (surfaceEdge != null) v(0xCCFFFFFF, 0x00FFFFFF, 0x00FFFFFF) else null,
+    carBack = v(0x00000000, 0x00000000, 0x14000000),
+    speed = v(0xFF111824, 0xFF111824, 0xFF4A5566),
+    aurora = aurora.first.copy(alpha = aurora.first.alpha * 0.6f) to aurora.second.copy(alpha = aurora.second.alpha * 0.6f),
+)
+
+/** Wygląd na ekranie: wybrany w Ustawieniach + zmiany z Dostosuj + tryb jasny. */
+fun effectiveTheme(): KokpitTheme {
+    val c = ThemeCustoms.current()
+    val base = themeState.value.let { if (LightMode.on) it.light() else it }
+    // w trybie jasnym własny kolor tła jest pomijany (to kolory ciemne)
+    return base.customized(if (LightMode.on) c.copy(screen = null) else c)
+}
+
+const val DEFAULT_ACCENT = 0xFF4DA3FF
+
+/** Rozmiar pisma z Dostosuj (mnożnik w s()). */
+val LocalFontScale = androidx.compose.runtime.staticCompositionLocalOf { 1f }
