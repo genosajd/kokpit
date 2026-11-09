@@ -1233,6 +1233,13 @@ fun ClimateBlock(modifier: Modifier, slot: Slot, act: MainActivity, onSettings: 
 
 // ---------- asystent AI ----------
 
+/** 12 345 → „12 tys.”, 1 000 000 → „1 mln” (tokeny rozmowy) */
+fun tokensText(t: Long) = when {
+    t >= 1_000_000 -> "%.1f mln".format(t / 1_000_000.0).replace(".0 ", " ")
+    t >= 1000 -> "${t / 1000} tys."
+    else -> "$t"
+}
+
 @Composable
 fun AssistantBlock(modifier: Modifier, slot: Slot, act: MainActivity, onSettings: () -> Unit) {
     val lines = Assistant.lines
@@ -1248,8 +1255,14 @@ fun AssistantBlock(modifier: Modifier, slot: Slot, act: MainActivity, onSettings
         Column(Modifier.fillMaxSize().padding(d(22))) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f)) { Label(Icons.Outlined.SmartToy, "Asystent · " + Assistant.providerName()) }
-                if (lines.isNotEmpty()) Icon(Icons.Outlined.RestartAlt, "Nowa rozmowa", tint = Dim,
-                    modifier = Modifier.size(d(40)).combinedClickable(onClick = { act.stopSpeaking(); Assistant.reset() }))
+                val tok by Assistant.tokens
+                if (tok > 0 && slot.w > 1) Text(tokensText(tok) + " / " + tokensText(Prefs.aiTokenLimit.toLong()), color = Dim, fontSize = s(17),
+                    modifier = Modifier.padding(end = d(12)))
+                // odświeżenie sesji: czysta rozmowa (inaczej zostaje też po restarcie radia)
+                if (lines.isNotEmpty()) Box(Modifier.size(d(56)).kokpitSurface(d(14))
+                    .combinedClickable(onClick = { act.stopSpeaking(); Assistant.reset() }), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Outlined.RestartAlt, "Nowa rozmowa", tint = Txt, modifier = Modifier.size(d(34)))
+                }
             }
             Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = d(12))) {
                 if (lines.isEmpty() && !busy) {

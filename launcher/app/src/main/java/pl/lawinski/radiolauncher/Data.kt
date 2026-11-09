@@ -158,6 +158,16 @@ object Prefs {
     var hotword: Boolean
         get() = sp.getBoolean("hotword", false)
         set(v) = sp.edit().putBoolean("hotword", v).apply()
+
+    /** czułość hasła: 0 = niska (najmniej fałszywych), 1 = średnia, 2 = wysoka */
+    var hotwordSens: Int
+        get() = sp.getInt("hotword_sens", 1)
+        set(v) = sp.edit().putInt("hotword_sens", v).apply()
+
+    /** rozmowa z asystentem zaczyna się od nowa po przekroczeniu tylu tokenów */
+    var aiTokenLimit: Int
+        get() = sp.getInt("ai_token_limit", 500_000)
+        set(v) = sp.edit().putInt("ai_token_limit", v).apply()
     var aiSpeak: Boolean
         get() = sp.getBoolean("ai_speak", true)
         set(v) = sp.edit().putBoolean("ai_speak", v).apply()

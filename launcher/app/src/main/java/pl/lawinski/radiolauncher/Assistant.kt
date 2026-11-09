@@ -11,6 +11,8 @@ import com.anthropic.errors.OverloadedException
 import com.anthropic.errors.PermissionDeniedException
 import com.anthropic.errors.RateLimitException
 import com.anthropic.errors.UnauthorizedException
+import com.anthropic.core.jsonMapper
+import com.anthropic.models.messages.CacheControlEphemeral
 import com.anthropic.models.messages.ContentBlockParam
 import com.anthropic.models.messages.MessageCreateParams
 import com.anthropic.models.messages.MessageParam
@@ -438,11 +440,28 @@ private fun systemPrompt(): String {
 private interface ChatEngine {
     /** Wysyła wypowiedź i zwraca odpowiedź (po wykonaniu narzędzi). Wywoływać poza wątkiem UI. */
     fun send(text: String): String
+
+    /** Rozmiar rozmowy w tokenach po ostatnim zapytaniu (cała historia + odpowiedź). */
+    val tokens: Long
+
+    /** Historia do zapisu w pliku (przetrwa restart radia) i jej odtworzenie. */
+    fun save(): JSONArray
+    fun load(saved: JSONArray, tokens: Long)
 }
 
 private class ClaudeEngine(private val act: MainActivity, apiKey: String, private val model: String) : ChatEngine {
     private val client: AnthropicClient = AnthropicOkHttpClient.builder().apiKey(apiKey).build()
     private val history = mutableListOf<MessageParam>()
+    override var tokens = 0L
+        private set
+
+    override fun save() = JSONArray().apply { history.forEach { put(JSONObject(jsonMapper().writeValueAsString(it))) } }
+
+    override fun load(saved: JSONArray, tokens: Long) {
+        history.clear()
+        for (i in 0 until saved.length()) history += jsonMapper().readValue(saved.getJSONObject(i).toString(), MessageParam::class.java)
+        this.tokens = tokens
+    }
 
     private val tools = AssistantTools.all.map { t ->
         Tool.builder()
@@ -475,8 +494,13 @@ private class ClaudeEngine(private val act: MainActivity, apiKey: String, privat
                 // przy odmowie filtrów bezpieczeństwa serwer sam ponawia na innym modelu
                 .putAdditionalHeader("anthropic-beta", "server-side-fallback-2026-07-01")
                 .putAdditionalBodyProperty("fallbacks", JsonValue.from("default"))
+                // długa rozmowa: wcześniejsza część z pamięci podręcznej – znacznie taniej
+                .cacheControl(CacheControlEphemeral.builder().build())
                 .build()
             val msg = client.messages().create(params)
+            msg.usage().let { u ->
+                tokens = u.inputTokens() + u.cacheReadInputTokens().orElse(0L) + u.cacheCreationInputTokens().orElse(0L) + u.outputTokens()
+            }
             // całą odpowiedź (z blokami myślenia) oddajemy bez zmian w kolejnym zapytaniu
             history += msg.toParam()
             val reply = msg.content().mapNotNull { b -> b.text().map { it.text() }.orElse(null) }.joinToString("").trim()
@@ -514,7 +538,18 @@ private class ClaudeEngine(private val act: MainActivity, apiKey: String, privat
 
 /** OpenAI: Chat Completions przez zwykłe HTTPS (bez dodatkowej biblioteki). */
 private class OpenAiEngine(private val act: MainActivity, private val apiKey: String, private val model: String) : ChatEngine {
-    private val history = JSONArray().put(JSONObject().put("role", "system").put("content", systemPrompt()))
+    private var history = JSONArray().put(JSONObject().put("role", "system").put("content", systemPrompt()))
+    override var tokens = 0L
+        private set
+
+    override fun save() = history
+
+    override fun load(saved: JSONArray, tokens: Long) {
+        if (saved.length() == 0) return
+        history = saved
+        history.put(0, JSONObject().put("role", "system").put("content", systemPrompt()))
+        this.tokens = tokens
+    }
 
     private val tools = JSONArray().apply {
         AssistantTools.all.forEach { t ->
@@ -534,7 +569,9 @@ private class OpenAiEngine(private val act: MainActivity, private val apiKey: St
         history.put(JSONObject().put("role", "user").put("content", text))
         repeat(8) {
             val body = JSONObject().put("model", model).put("messages", history).put("tools", tools)
-            val msg = post(body).getJSONArray("choices").getJSONObject(0).getJSONObject("message")
+            val res = post(body)
+            res.optJSONObject("usage")?.let { tokens = it.optLong("total_tokens", tokens) }
+            val msg = res.getJSONArray("choices").getJSONObject(0).getJSONObject("message")
             history.put(msg)
             val calls = msg.optJSONArray("tool_calls")
             val images = mutableListOf<String>()
@@ -601,23 +638,76 @@ object Assistant {
 
     fun hasKey() = (if (Prefs.aiProvider == OPENAI) Prefs.openaiKey else Prefs.anthropicKey).isNotBlank()
 
+    /** rozmiar bieżącej rozmowy w tokenach (pokazywany w bloku i w Ustawieniach) */
+    val tokens = mutableStateOf(0L)
+
+    /** Zapis rozmowy w plikach aplikacji – po restarcie radia ta sama rozmowa z historią. */
+    private var file: java.io.File? = null
+    private val io = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    /** Wczytuje zapisaną rozmowę (wołane w MainActivity.onCreate). */
+    fun init(ctx: android.content.Context) {
+        if (file != null) return
+        val f = java.io.File(ctx.filesDir, "assistant_chat.json")
+        file = f
+        val j = runCatching { JSONObject(f.readText()) }.getOrNull() ?: return
+        val l = j.optJSONArray("lines") ?: JSONArray()
+        lines.clear()
+        for (i in 0 until l.length()) l.optJSONObject(i)?.let { lines += ChatLine(it.optBoolean("user"), it.optString("text")) }
+        tokens.value = j.optLong("tokens")
+    }
+
     /** Nowa rozmowa (też po zmianie dostawcy, klucza albo modelu). */
     fun reset() {
         engine = null
         engineKey = ""
         lines.clear()
+        tokens.value = 0L
+        val f = file
+        io.execute { f?.delete() }
     }
 
-    private fun engine(act: MainActivity): ChatEngine {
+    private fun engineId(): String {
         val p = Prefs.aiProvider
         val key = if (p == OPENAI) Prefs.openaiKey else Prefs.anthropicKey
         val model = if (p == OPENAI) Prefs.openaiModel else Prefs.anthropicModel
-        val id = "$p|$key|$model|${Prefs.aiInstructions.hashCode()}"
-        if (engine == null || id != engineKey) {
-            engine = if (p == OPENAI) OpenAiEngine(act, key, model) else ClaudeEngine(act, key, model)
-            engineKey = id
+        return "$p|$key|$model|${Prefs.aiInstructions.hashCode()}"
+    }
+
+    /** w pliku tylko skrót – bez klucza API */
+    private fun engineTag(id: String) = java.security.MessageDigest.getInstance("SHA-256").digest(id.toByteArray())
+        .take(12).joinToString("") { "%02x".format(it) }
+
+    /** Silnik rozmowy; nowy odtwarza historię z pliku, jeśli to ten sam dostawca, model i instrukcje. Poza wątkiem UI. */
+    private fun engine(act: MainActivity): ChatEngine {
+        val p = Prefs.aiProvider
+        val id = engineId()
+        engine?.let { if (id == engineKey) return it }
+        val key = if (p == OPENAI) Prefs.openaiKey else Prefs.anthropicKey
+        val model = if (p == OPENAI) Prefs.openaiModel else Prefs.anthropicModel
+        val e: ChatEngine = if (p == OPENAI) OpenAiEngine(act, key, model) else ClaudeEngine(act, key, model)
+        runCatching {
+            val j = JSONObject(file!!.readText())
+            if (j.optString("engine") == engineTag(id)) e.load(j.getJSONArray("history"), j.optLong("tokens"))
         }
-        return engine!!
+        engine = e
+        engineKey = id
+        return e
+    }
+
+    private fun save(e: ChatEngine) {
+        val f = file ?: return
+        val l = JSONArray().apply { lines.forEach { put(JSONObject().put("user", it.fromUser).put("text", it.text)) } }
+        val tag = engineTag(engineKey)
+        val history = e.save().toString()
+        val t = e.tokens
+        io.execute {
+            runCatching {
+                val tmp = java.io.File(f.path + ".tmp")
+                tmp.writeText(JSONObject().put("engine", tag).put("tokens", t).put("lines", l).put("history", JSONArray(history)).toString())
+                tmp.renameTo(f)
+            }
+        }
     }
 
     fun send(act: MainActivity, text: String) {
@@ -627,18 +717,27 @@ object Assistant {
             lines += ChatLine(false, "Wpisz klucz API ${providerName()} w Ustawieniach → Asystent.")
             return
         }
+        // limit z Ustawień: rozmowa za długa (drogo i wolno) – zaczynamy czystą
+        if (tokens.value >= Prefs.aiTokenLimit) {
+            reset()
+            lines += ChatLine(false, "Rozmowa przekroczyła limit tokenów – zaczynam nową.")
+        }
         lines += ChatLine(true, t)
         busy.value = true
         scope.launch {
+            var ok: ChatEngine? = null
             val reply = try {
-                val e = engine(act)
-                withContext(Dispatchers.IO) { e.send(t) }
+                withContext(Dispatchers.IO) {
+                    val e = engine(act)
+                    e.send(t).also { ok = e }
+                }
             } catch (e: Exception) {
-                engine = null // historia mogła się urwać w połowie narzędzi – zaczynamy od nowa
+                engine = null // historia mogła się urwać w połowie narzędzi – wracamy do ostatniego zapisu
                 errorText(e)
             }
             busy.value = false
             lines += ChatLine(false, reply)
+            ok?.let { tokens.value = it.tokens; save(it) }
             if (Prefs.aiSpeak) act.speak(reply)
             // bez bloku „Asystent” na ekranie (wywołanie przyciskiem głosowym) pokaż odpowiedź w dymku
             if (!VoiceActivity.open && act.layout.value.none { it.id == BlockId.ASSISTANT }) android.widget.Toast.makeText(act, reply, android.widget.Toast.LENGTH_LONG).show()

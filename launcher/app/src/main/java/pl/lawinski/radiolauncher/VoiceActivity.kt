@@ -227,8 +227,10 @@ class VoiceActivity : ComponentActivity() {
         heard.value = text
         phase.value = Phase.THINKING
         activity.value++
-        waitingLines = Assistant.lines.size + 1 // + pytanie
         Assistant.send(act, text)
+        // odpowiedź = pierwsza linia po pytaniu (send mógł zacząć nową rozmowę po limicie tokenów);
+        // bez zapytania (np. brak klucza) ostatnia linia to już komunikat
+        waitingLines = if (Assistant.busy.value) Assistant.lines.size else Assistant.lines.size - 1
     }
 
     private fun showError(text: String) {

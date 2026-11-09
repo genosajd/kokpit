@@ -120,6 +120,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Prefs.init(this)
+        Assistant.init(this)
         live = this
         widgetManager = AppWidgetManager.getInstance(this)
         widgetHost = AppWidgetHost(this, WIDGET_HOST_ID)

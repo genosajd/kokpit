@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.DataUsage
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.foundation.border
@@ -208,6 +209,8 @@ fun SettingsDialog(
     var aiProvider by remember { mutableStateOf(Prefs.aiProvider) }
     var aiSpeak by remember { mutableStateOf(Prefs.aiSpeak) }
     var hotword by remember { mutableStateOf(Prefs.hotword) }
+    var hotwordSens by remember { mutableStateOf(Prefs.hotwordSens) }
+    var tokenLimit by remember { mutableStateOf(Prefs.aiTokenLimit) }
     val ttsEngine = Prefs.ttsEngine
     var group by remember { mutableStateOf(Prefs.settingsGroup.coerceIn(0, SETTINGS_GROUPS.size - 1)) }
 
@@ -229,7 +232,7 @@ fun SettingsDialog(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("Kokpit F11 0.3.10", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
+                Text("Kokpit F11 0.3.11", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
             }
             Spacer(Modifier.width(d(26)))
             LazyVerticalGrid(
@@ -387,7 +390,7 @@ fun SettingsDialog(
                         when {
                             !hotword -> "Wyłączone – nie zużywa mikrofonu ani procesora"
                             !overlay -> "Włączone, ale brak zgody „Wyświetlanie nad innymi” – dotknij"
-                            else -> "Słucha stale (w radiu, bez internetu); trochę obciąża procesor"
+                            else -> "Słucha (w radiu, bez internetu), gdy radio nie gra; trochę obciąża procesor"
                         }, on = hotword) {
                         if (hotword && !overlay) {
                             runCatching { act.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:" + act.packageName))) }
@@ -408,10 +411,24 @@ fun SettingsDialog(
                         }
                     }
                 }
+                if (hotword) item {
+                    val names = listOf("niska – tylko wyraźne „OK BMW”", "średnia", "wysoka – reaguje łatwiej, częściej sam się włącza")
+                    SettingTile(Icons.Outlined.Tune, "Czułość „OK BMW”: " + names[hotwordSens].substringBefore(" –"),
+                        names[hotwordSens].substringAfter("– ", "Dotknij, aby zmienić; gdy radio gra, nie słucha")) {
+                        hotwordSens = (hotwordSens + 1) % 3; Prefs.hotwordSens = hotwordSens
+                    }
+                }
                 item {
                     val oa = ttsEngine == Speech.OPENAI
                     SettingTile(Icons.Outlined.GraphicEq, "Głos: " + if (oa) "OpenAI (${Prefs.openaiVoice})" else "Google w radiu",
                         if (oa) "Najbardziej ludzki; płatny, klucz OpenAI. Dotknij, aby wybrać" else "Dotknij, aby wybrać głos albo OpenAI") { onVoices() }
+                }
+                item {
+                    SettingTile(Icons.Outlined.DataUsage, "Limit rozmowy: ${tokensText(tokenLimit.toLong())} tokenów",
+                        "Rozmowa zostaje po restarcie radia; po przekroczeniu limitu zaczyna się nowa. Teraz: ${tokensText(Assistant.tokens.value)}. Dotknij, aby zmienić") {
+                        val all = listOf(50_000, 100_000, 200_000, 500_000, 800_000)
+                        tokenLimit = all[(all.indexOf(tokenLimit) + 1) % all.size]; Prefs.aiTokenLimit = tokenLimit
+                    }
                 }
                 item { SettingTile(Icons.Outlined.RestartAlt, "Nowa rozmowa", "Asystent zapomni dotychczasową rozmowę") { Assistant.reset() } }
                     }

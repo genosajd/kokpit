@@ -10,6 +10,7 @@ import android.os.Handler
 import android.os.Looper
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.graphics.drawable.toBitmap
@@ -77,9 +78,26 @@ class SplitService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
     override fun onInterrupt() {}
 
+    /**
+     * Przycisk głosowy na kierownicy: przechwycony, zanim system zamieni go na wyszukiwanie Google
+     * (które w radiu otwierało ustawienia domyślnego asystenta). Otwiera okienko asystenta Kokpitu.
+     */
+    override fun onKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0)
+            android.util.Log.i("KokpitKeys", "klawisz ${KeyEvent.keyCodeToString(event.keyCode)} (${event.keyCode}) z ${event.deviceId}")
+        if (event.keyCode !in VOICE_KEYS) return false
+        if (event.action == KeyEvent.ACTION_UP) {
+            Speech.stop()
+            VoiceActivity.start(this)
+        }
+        return true
+    }
+
     companion object {
         @Volatile
         var instance: SplitService? = null
+
+        private val VOICE_KEYS = setOf(KeyEvent.KEYCODE_VOICE_ASSIST, KeyEvent.KEYCODE_ASSIST, KeyEvent.KEYCODE_SEARCH)
     }
 }
 
