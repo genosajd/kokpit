@@ -130,6 +130,20 @@ private object AssistantTools {
             listOf("action", "date", "days", "title", "minutes", "location"),
         ),
         Def(
+            "slack",
+            "Slack właściciela (workspace Web Systems), w jego imieniu. unread = rozmowy z nieprzeczytanymi; read = ostatnie wiadomości z rozmowy target (kanał np. „#ogolny” albo imię osoby; thread = ts wątku, żeby przeczytać odpowiedzi); search = szukaj query w wiadomościach (składnia Slacka, np. „from:@Marek faktura”); send = wiadomość text do target (thread = ts, żeby odpowiedzieć w wątku). WYSYŁANIE: pierwsze send (confirmed=false) tylko przygotowuje szkic – przeczytaj adresata i treść i zapytaj, czy wysłać; send z confirmed=true dopiero po wyraźnym „tak” w następnej wypowiedzi. Czytając wiadomości na głos, streszczaj zwięźle.",
+            mapOf(
+                "action" to mapOf("type" to "string", "enum" to listOf("unread", "read", "search", "send")),
+                "target" to mapOf("type" to "string", "description" to "read/send: kanał albo osoba; inaczej pusty"),
+                "query" to mapOf("type" to "string", "description" to "search: czego szukać; inaczej pusty"),
+                "text" to mapOf("type" to "string", "description" to "send: treść wiadomości; inaczej pusty"),
+                "thread" to mapOf("type" to "string", "description" to "ts wątku albo pusty"),
+                "count" to mapOf("type" to "integer", "description" to "read/search: ile wiadomości (np. 10); inaczej 0"),
+                "confirmed" to mapOf("type" to "boolean", "description" to "send: true tylko po wyraźnym potwierdzeniu użytkownika; inaczej false"),
+            ),
+            listOf("action", "target", "query", "text", "thread", "count", "confirmed"),
+        ),
+        Def(
             "radio_control",
             "Obsługa radia i Kokpitu. action: volume_set (value 0–100 %), volume_up, volume_down, mute, unmute, brightness_set (value 0–100 %), idrive_screen (oryginalny ekran BMW iDrive), split_screen (Mapy + YouTube obok siebie), radio_settings (ustawienia radia Witstek), android_settings, home (ekran Kokpitu), theme (value: 0 = Płaski, 1 = BMW iDrive, 2 = M Sport), status (głośność i jasność). Dla akcji bez liczby podaj value 0.",
             mapOf(
@@ -144,7 +158,8 @@ private object AssistantTools {
     )
 
     fun run(act: MainActivity, name: String, input: JSONObject): ToolOut =
-        if (name == "camera_snapshot") snapshot(act, input.optString("camera").trim()) else ToolOut(runText(act, name, input))
+        if (!Access.allows(name)) ToolOut("Właściciel wyłączył ten dostęp w Ustawieniach Kokpitu → Asystent AI → Dostępy.")
+        else if (name == "camera_snapshot") snapshot(act, input.optString("camera").trim()) else ToolOut(runText(act, name, input))
 
     /** Klatka z kamery: go2rtc w Xiaomi Cam daje krótki plik api/frame.mp4, z którego bierzemy pierwszy obraz. */
     private fun snapshot(act: MainActivity, wanted: String): ToolOut {
@@ -198,6 +213,7 @@ private object AssistantTools {
         "media_control" -> mediaControl(act, input.optString("action"), input.optString("app").trim())
         "camera_control" -> cameraControl(act, input)
         "calendar" -> calendar(act, input)
+        "slack" -> Slack.run(input)
         "home_ac" -> homeAc(input.optString("action"), input.optDouble("value", 0.0))
         "radio_control" -> radioControl(act, input.optString("action"), input.optInt("value"))
         "open_app" -> openApp(act, input.optString("app").trim(), input.optString("search").trim())
@@ -453,13 +469,14 @@ private object AssistantTools {
 private const val BASE_PROMPT = """Jesteś asystentem w aucie: ekran radia w BMW F11 Touring z launcherem Kokpit F11. Rozmawia z Tobą kierowca albo pasażer.
 Odpowiadaj po polsku, krótko i naturalnie, zwykle 1–3 zdaniami – odpowiedzi są czytane na głos, więc pisz zwykłym tekstem, bez list, nagłówków, tabel i znaczników Markdown.
 Kierowca nie powinien czytać długich tekstów w czasie jazdy, dlatego najważniejsze mów na początku.
-Masz narzędzia: car_status (stan auta, położenie, trasa), navigate i open_saved_place (włączają nawigację w Mapach Google), open_app (uruchamia aplikację w radiu i może w niej wyszukać), play_youtube (od razu odtwarza w YouTube to, o co ktoś prosi), media_control (pauza, wznowienie, następny, poprzedni, co teraz gra) i radio_control (głośność, jasność, ekran BMW iDrive, podzielony ekran, ustawienia, wygląd Kokpitu) camera_control (obrót kamery, punkty, zoom), home_ac (klimatyzator w domu: temperatura, wł./wył., ustawienie), calendar (kalendarz Google właściciela: terminy i dodawanie nowych) i camera_snapshot (aktualne zdjęcie z kamery Xiaomi – gdy ktoś pyta, co widać na kamerze, zawsze zrób nowe zdjęcie). Gdy ktoś prosi o włączenie muzyki lub filmu, użyj play_youtube. Gdy pytanie dotyczy auta, paliwa, miejsca albo trasy, najpierw sprawdź car_status. Gdy ktoś prosi o trasę, od razu włącz nawigację i krótko to potwierdź."""
+Masz narzędzia: car_status (stan auta, położenie, trasa), navigate i open_saved_place (włączają nawigację w Mapach Google), open_app (uruchamia aplikację w radiu i może w niej wyszukać), play_youtube (od razu odtwarza w YouTube to, o co ktoś prosi), media_control (pauza, wznowienie, następny, poprzedni, co teraz gra) i radio_control (głośność, jasność, ekran BMW iDrive, podzielony ekran, ustawienia, wygląd Kokpitu) camera_control (obrót kamery, punkty, zoom), home_ac (klimatyzator w domu: temperatura, wł./wył., ustawienie), calendar (kalendarz Google właściciela: terminy i dodawanie nowych), slack (Slack właściciela: nieprzeczytane, czytanie, szukanie i wysyłanie – zawsze z potwierdzeniem) i camera_snapshot (aktualne zdjęcie z kamery Xiaomi – gdy ktoś pyta, co widać na kamerze, zawsze zrób nowe zdjęcie). Gdy ktoś prosi o włączenie muzyki lub filmu, użyj play_youtube. Gdy pytanie dotyczy auta, paliwa, miejsca albo trasy, najpierw sprawdź car_status. Gdy ktoś prosi o trasę, od razu włącz nawigację i krótko to potwierdź."""
 
 /** Prompt systemowy: stały opis roli + instrukcje właściciela z Ustawień (jak się zwracać, styl…). */
 private fun systemPrompt(): String {
     val own = Prefs.aiInstructions.trim()
-    return if (own.isEmpty()) BASE_PROMPT
-    else "$BASE_PROMPT\n\nInstrukcje od właściciela auta (stosuj je zawsze, chyba że przeczą bezpieczeństwu w czasie jazdy):\n$own"
+    val base = BASE_PROMPT + Access.promptNote()
+    return if (own.isEmpty()) base
+    else "$base\n\nInstrukcje od właściciela auta (stosuj je zawsze, chyba że przeczą bezpieczeństwu w czasie jazdy):\n$own"
 }
 
 /** Rozmowa z jednym dostawcą; trzyma całą historię, żeby asystent pamiętał kontekst. */
@@ -489,7 +506,7 @@ private class ClaudeEngine(private val act: MainActivity, apiKey: String, privat
         this.tokens = tokens
     }
 
-    private val tools = AssistantTools.all.map { t ->
+    private val tools = AssistantTools.all.filter { Access.allows(it.name) }.map { t ->
         Tool.builder()
             .name(t.name)
             .description(t.description)
@@ -516,7 +533,7 @@ private class ClaudeEngine(private val act: MainActivity, apiKey: String, privat
                 .messages(history.toList())
                 .outputConfig(OutputConfig.builder().effort(OutputConfig.Effort.LOW).build())
                 .apply { tools.forEach { addTool(it) } }
-                .addTool(WebSearchTool20260209.builder().maxUses(3L).build())
+                .apply { if (Access.allows(Access.WEB)) addTool(WebSearchTool20260209.builder().maxUses(3L).build()) }
                 // przy odmowie filtrów bezpieczeństwa serwer sam ponawia na innym modelu
                 .putAdditionalHeader("anthropic-beta", "server-side-fallback-2026-07-01")
                 .putAdditionalBodyProperty("fallbacks", JsonValue.from("default"))
@@ -578,7 +595,7 @@ private class OpenAiEngine(private val act: MainActivity, private val apiKey: St
     }
 
     private val tools = JSONArray().apply {
-        AssistantTools.all.forEach { t ->
+        AssistantTools.all.filter { Access.allows(it.name) }.forEach { t ->
             put(JSONObject().put("type", "function").put("function", JSONObject()
                 .put("name", t.name)
                 .put("description", t.description)
@@ -749,6 +766,7 @@ object Assistant {
             lines += ChatLine(false, "Rozmowa przekroczyła limit tokenów – zaczynam nową.")
         }
         lines += ChatLine(true, t)
+        Slack.turn++ // potwierdzenie wysłania wiadomości Slack musi przyjść w nowej wypowiedzi
         busy.value = true
         scope.launch {
             var ok: ChatEngine? = null

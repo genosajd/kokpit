@@ -105,6 +105,16 @@ object Prefs {
     var tuyaId: String
         get() = sp.getString("tuya_id", "") ?: ""
         set(v) = sp.edit().putString("tuya_id", v).apply()
+    /** User OAuth Token aplikacji Slack „Kokpit F11” (xoxp-…); tylko w radiu */
+    var slackToken: String
+        get() = sp.getString("slack_token", "") ?: ""
+        set(v) = sp.edit().putString("slack_token", v).apply()
+
+    /** dostępy asystenta wyłączone przez właściciela (id grup z Access.groups) */
+    var aiDisabled: Set<String>
+        get() = sp.getStringSet("ai_disabled", emptySet())?.toSet() ?: emptySet()
+        set(v) = sp.edit().putStringSet("ai_disabled", v).apply()
+
     var tuyaSecret: String
         get() = sp.getString("tuya_secret", "") ?: ""
         set(v) = sp.edit().putString("tuya_secret", v).apply()

@@ -235,7 +235,7 @@ fun SettingsDialog(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("Kokpit F11 0.3.13", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
+                Text("Kokpit F11 0.3.14", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
             }
             Spacer(Modifier.width(d(26)))
             LazyVerticalGrid(
@@ -450,6 +450,24 @@ fun SettingsDialog(
                     }
                 }
                 item { SettingTile(Icons.Outlined.RestartAlt, "Nowa rozmowa", "Asystent zapomni dotychczasową rozmowę") { Assistant.reset() } }
+                item {
+                    val token = Prefs.slackToken
+                    SettingTile(Icons.Outlined.Key, "Slack",
+                        if (token.isBlank()) "Nie połączono – wklej User OAuth Token (xoxp-…)" else "Połączono: …" + token.takeLast(4),
+                        on = token.isNotBlank()) { onAiField(AiField.SLACK_TOKEN) }
+                }
+                // dostępy: każdy włącza/wyłącza dotknięciem (zmiana zaczyna nową rozmowę)
+                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                    Text("Dostępy asystenta – dotknij, aby zablokować albo odblokować", color = Dim, fontSize = s(20),
+                        modifier = Modifier.padding(top = d(14), bottom = d(4)))
+                }
+                Access.groups.forEach { g ->
+                    item {
+                        @Suppress("UNUSED_VARIABLE") val v = Access.version.value
+                        val on = Access.enabled(g.id)
+                        SettingTile(g.icon, g.title, if (on) g.description else "Zablokowane", on = on) { Access.set(g.id, !on) }
+                    }
+                }
                     }
                 }
             }
@@ -728,6 +746,7 @@ enum class AiField(val title: String, val hint: String, val secret: Boolean) {
     OPENAI_MODEL("Model OpenAI", Assistant.DEFAULT_OPENAI_MODEL, false),
     TUYA_ID("Tuya Access ID", "z projektu na platform.tuya.com", false),
     TUYA_SECRET("Tuya Access Secret", "z projektu na platform.tuya.com", true),
+    SLACK_TOKEN("Slack: User OAuth Token", "xoxp-…", true),
 }
 
 /** Wpisanie klucza API albo nazwy modelu asystenta; puste pole modelu = domyślny. */
@@ -742,6 +761,7 @@ fun AiFieldDialog(field: AiField, onClose: () -> Unit) {
                 AiField.OPENAI_MODEL -> Prefs.openaiModel
                 AiField.TUYA_ID -> Prefs.tuyaId
                 AiField.TUYA_SECRET -> Prefs.tuyaSecret
+                AiField.SLACK_TOKEN -> Prefs.slackToken
             }
         )
     }
@@ -763,6 +783,7 @@ fun AiFieldDialog(field: AiField, onClose: () -> Unit) {
                 Text(
                     when {
                         field == AiField.TUYA_ID || field == AiField.TUYA_SECRET -> "Projekt „Kokpit F11” → Overview → Authorization Key. Zostaje tylko w radiu."
+                        field == AiField.SLACK_TOKEN -> "api.slack.com/apps → Kokpit F11 → OAuth & Permissions → User OAuth Token. Zostaje tylko w radiu."
                         field.secret -> "Klucz zostaje tylko w radiu. Za zapytania płacisz u dostawcy według zużycia."
                         else -> "Puste pole = model domyślny (${field.hint})."
                     },
@@ -779,6 +800,7 @@ fun AiFieldDialog(field: AiField, onClose: () -> Unit) {
                     AiField.OPENAI_MODEL -> Prefs.openaiModel = text
                     AiField.TUYA_ID -> { Prefs.tuyaId = text; Tuya.reset() }
                     AiField.TUYA_SECRET -> { Prefs.tuyaSecret = text; Tuya.reset() }
+                    AiField.SLACK_TOKEN -> { Prefs.slackToken = text; Slack.reset() }
                 }
                 Assistant.reset()
                 onClose()
