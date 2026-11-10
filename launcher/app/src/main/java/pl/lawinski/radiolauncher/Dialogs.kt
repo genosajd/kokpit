@@ -64,7 +64,6 @@ import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.VerticalSplit
 import androidx.compose.material.icons.outlined.Videocam
-import androidx.compose.material.icons.outlined.ViewInAr
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material.icons.outlined.Widgets
 import androidx.compose.material.icons.outlined.Work
@@ -204,7 +203,6 @@ fun SettingsDialog(
     var splitLeft by remember { mutableStateOf(Prefs.splitLeft) }
     var splitRight by remember { mutableStateOf(Prefs.splitRight) }
     val live by act.liveCamera
-    val model by act.carModelPath
     fun open(action: String) = try {
         act.startActivity(Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     } catch (_: Exception) {
@@ -237,7 +235,7 @@ fun SettingsDialog(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("Kokpit F11 0.3.12", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
+                Text("Kokpit F11 0.3.13", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
             }
             Spacer(Modifier.width(d(26)))
             LazyVerticalGrid(
@@ -338,9 +336,6 @@ fun SettingsDialog(
                     }
                 }
                 item { SettingTile(Icons.Outlined.PlayCircle, "Pokaz danych auta", if (demo) "Paliwo i drzwi to dane przykładowe" else "Paliwo i drzwi z modułu CAN radia", on = demo) { onDemo(!demo) } }
-                item { SettingTile(Icons.Outlined.ViewInAr, "Model 3D: wczytaj własny", if (model.isBlank()) "Wybierz plik .glb (np. z pendrive’a)" else "Wczytany – dotknij, aby zamienić") { act.pickCarModel() } }
-                item { SettingTile(Icons.Outlined.DirectionsCar, "Model 3D: białe F11", "Wbudowany model, obracany palcem") { act.restoreCarModel() } }
-                if (model.isNotBlank()) item { SettingTile(Icons.Outlined.Delete, "Usuń model 3D", "Wróci zdjęcie auta") { act.removeCarModel() } }
                     }
                     8 -> {
                 item {

@@ -40,6 +40,9 @@ import androidx.compose.material.icons.outlined.WaterDrop
 import androidx.compose.material.icons.outlined.Air
 import androidx.compose.material.icons.outlined.PowerSettingsNew
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Remove
+import androidx.compose.material.icons.outlined.Restore
+import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
@@ -81,6 +84,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
@@ -170,6 +174,8 @@ sealed interface Dlg {
     data object Cameras : Dlg
     /** wybór widżetu do klocka „Widżet” nr n */
     data class Widgets(val n: Int) : Dlg
+    /** wybór urządzenia do klocka „Urządzenie Tuya” nr n */
+    data class TuyaDevices(val n: Int) : Dlg
 }
 
 /** Edycja układu tylko na postoju: powyżej tej prędkości z GPS przycisk jest nieaktywny. */
@@ -229,8 +235,17 @@ fun LauncherScreen(act: MainActivity) {
                 Column(Modifier.fillMaxSize().padding(horizontal = d(28))) {
                     if (edit) {
                         EditBar(slots,
-                            onAdd = { id -> LayoutStore.place(slots, id)?.let { act.saveLayout(it) } },
+                            onAdd = { id ->
+                                val next = LayoutStore.place(slots, id)
+                                if (next != null) act.saveLayout(next)
+                                else android.widget.Toast.makeText(act, "Brak miejsca – zmniejsz albo schowaj klocek, albo dodaj stronę ekranu (Ustawienia → Ekran)", android.widget.Toast.LENGTH_LONG).show()
+                            },
                             onReset = { act.saveLayout(LayoutStore.DEFAULT) },
+                            onStore = {
+                                act.storeLayout()
+                                android.widget.Toast.makeText(act, "Zapisano układ – „Przywróć zapisany” wróci do niego", android.widget.Toast.LENGTH_SHORT).show()
+                            },
+                            onRestore = if (act.hasSavedLayout.value) ({ act.restoreLayout() }) else null,
                             onDone = { edit = false })
                     } else {
                         StatusBar(
@@ -243,6 +258,7 @@ fun LauncherScreen(act: MainActivity) {
                         BlockGrid(slots, edit, d(20), onChange = { act.saveLayout(it) },
                             editExtra = { slot ->
                                 if (slot.id == BlockId.WIDGET) WidgetChangeButton { dialog = Dlg.Widgets(slot.n) }
+                                if (slot.id == BlockId.TUYA) WidgetChangeButton { dialog = Dlg.TuyaDevices(slot.n) }
                             }) { slot ->
                             val m = Modifier.fillMaxSize()
                             when (slot.id) {
@@ -260,6 +276,7 @@ fun LauncherScreen(act: MainActivity) {
                                 BlockId.CAMERA -> CameraBlock(m, act, onChoose = { dialog = Dlg.Cameras })
                                 BlockId.WEATHER -> WeatherBlock(m, slot, act)
                                 BlockId.CLIMATE -> ClimateBlock(m, slot, act, onSettings = { Prefs.settingsGroup = 8; dialog = Dlg.Settings })
+                                BlockId.TUYA -> TuyaDeviceBlock(m, slot, act, onChoose = { dialog = Dlg.TuyaDevices(slot.n) }, onSettings = { Prefs.settingsGroup = 8; dialog = Dlg.Settings })
                                 BlockId.ASSISTANT -> AssistantBlock(m, slot, act, onSettings = { Prefs.settingsGroup = 7; dialog = Dlg.Settings })
                                 BlockId.WIDGET -> WidgetBlock(m, act, slot.n, onChoose = { dialog = Dlg.Widgets(slot.n) })
                             }
@@ -305,6 +322,7 @@ fun LauncherScreen(act: MainActivity) {
                     is Dlg.Custom -> CustomizeDialog(dl.field, onClose = { dialog = Dlg.Settings })
                     is Dlg.Instructions -> InstructionsDialog(onClose = { dialog = Dlg.Settings })
                     is Dlg.Cameras -> CameraPickerDialog(act, onClose = { dialog = null })
+                    is Dlg.TuyaDevices -> TuyaDevicePickerDialog(act, dl.n, onClose = { dialog = null })
                     is Dlg.Widgets -> WidgetPickerDialog(act, onClose = { dialog = null }) { provider ->
                         dialog = null
                         act.addBlockWidget(dl.n, provider)
@@ -462,7 +480,9 @@ fun StatusBar(onSettings: () -> Unit, onEdit: () -> Unit, editAllowed: Boolean) 
         }
         Spacer(Modifier.weight(1f))
         SystemIcons()
-        Spacer(Modifier.width(d(26)))
+        Spacer(Modifier.width(d(20)))
+        VolumeControl()
+        Spacer(Modifier.width(d(14)))
         val ctx = LocalContext.current
         Pill(Icons.Outlined.Tune, "Radio", onClick = { openRadioSettings(ctx) })
         Spacer(Modifier.width(d(14)))
@@ -474,7 +494,7 @@ fun StatusBar(onSettings: () -> Unit, onEdit: () -> Unit, editAllowed: Boolean) 
 
 /** Pasek w trybie edycji: ukryte klocki do dodania, przywrócenie układu i "Gotowe". */
 @Composable
-fun EditBar(slots: List<Slot>, onAdd: (BlockId) -> Unit, onReset: () -> Unit, onDone: () -> Unit) {
+fun EditBar(slots: List<Slot>, onAdd: (BlockId) -> Unit, onReset: () -> Unit, onStore: () -> Unit, onRestore: (() -> Unit)?, onDone: () -> Unit) {
     Row(Modifier.fillMaxWidth().height(d(76)), verticalAlignment = Alignment.CenterVertically) {
         Text("Przeciągnij klocek · niebieski uchwyt zmienia rozmiar", color = Dim, fontSize = s(24))
         Spacer(Modifier.width(d(30)))
@@ -483,7 +503,13 @@ fun EditBar(slots: List<Slot>, onAdd: (BlockId) -> Unit, onReset: () -> Unit, on
             Spacer(Modifier.width(d(12)))
         }
         Spacer(Modifier.weight(1f))
-        Pill(null, "Przywróć układ", onClick = onReset)
+        Pill(Icons.Outlined.Save, "Zapisz układ", onClick = onStore)
+        Spacer(Modifier.width(d(14)))
+        if (onRestore != null) {
+            Pill(Icons.Outlined.Restore, "Przywróć zapisany", onClick = onRestore)
+            Spacer(Modifier.width(d(14)))
+        }
+        Pill(null, "Domyślny", onClick = onReset)
         Spacer(Modifier.width(d(14)))
         Pill(null, "Gotowe", color = LocalTheme.current.activeText, active = true, onClick = onDone)
     }
@@ -728,9 +754,6 @@ fun Tile(
 fun CarBlock(modifier: Modifier, act: MainActivity, apps: List<AppEntry>, edit: Boolean, onSplitSettings: () -> Unit) {
     val speed by act.location.speedKmh.collectAsState()
     val car by CarData.status.collectAsState()
-    val model by act.carModelPath
-    val visible by act.visible
-    var show3d by remember { mutableStateOf(Prefs.show3d) }
     LaunchedEffect(Unit) {
         while (true) {
             act.location.checkStale()
@@ -753,7 +776,6 @@ fun CarBlock(modifier: Modifier, act: MainActivity, apps: List<AppEntry>, edit: 
                         }
                     }
                 }
-                model.isNotBlank() && show3d && visible && !edit -> Car3DView(model, Modifier.fillMaxSize().padding(top = d(90), bottom = d(20)))
                 else -> Image(
                     painterResource(R.drawable.car_f11), "BMW F11",
                     contentScale = ContentScale.Fit,
@@ -816,14 +838,6 @@ fun CarBlock(modifier: Modifier, act: MainActivity, apps: List<AppEntry>, edit: 
                         .padding(horizontal = d(16), vertical = d(14)),
                 ) { Text("iDrive", color = Txt, fontSize = s(24), fontWeight = FontWeight.Bold) }
                 Spacer(Modifier.width(d(14)))
-                if (model.isNotBlank() && car.open.isEmpty()) {
-                    Box(
-                        Modifier.kokpitSurface(d(18), active = show3d)
-                            .combinedClickable(onClick = { show3d = !show3d; Prefs.show3d = show3d })
-                            .padding(d(14)),
-                    ) { Text("3D", color = if (show3d) theme.activeText else Txt, fontSize = s(26), fontWeight = FontWeight.Bold) }
-                    Spacer(Modifier.width(d(14)))
-                }
                 val left = Apps.find(apps, Prefs.splitLeft)
                 val right = Apps.find(apps, Prefs.splitRight)
                 Row(
@@ -899,22 +913,12 @@ fun NavBlock(modifier: Modifier, slot: Slot, act: MainActivity, onAddress: (Bool
                 }
             }
             Spacer(Modifier.weight(1f))
+            // zapisane miejsca: same ikony obok siebie (przytrzymanie = zmiana adresu)
             val place3 = Prefs.place3Name.ifBlank { null }
-            if (compact) {
-                Row(horizontalArrangement = Arrangement.spacedBy(d(12))) {
-                    val wide = slot.w > 2
-                    DestButton(Icons.Outlined.Home, if (wide) "Dom" else "", Modifier.weight(1f), { goSaved(act, Prefs.home, false) }) { onAddress(false) }
-                    DestButton(Icons.Outlined.Work, if (wide) "Praca" else "", Modifier.weight(1f), { goSaved(act, Prefs.work, true) }) { onAddress(true) }
-                    if (place3 != null) DestButton(Icons.Outlined.Place, if (wide) place3 else "", Modifier.weight(1f), { goPlace3(act) }, onPlace3)
-                }
-            } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(d(12))) {
                 DestButton(Icons.Outlined.Home, "Dom", onClick = { goSaved(act, Prefs.home, false) }) { onAddress(false) }
-                Spacer(Modifier.height(d(12)))
                 DestButton(Icons.Outlined.Work, "Praca", onClick = { goSaved(act, Prefs.work, true) }) { onAddress(true) }
-                if (place3 != null) {
-                    Spacer(Modifier.height(d(12)))
-                    DestButton(Icons.Outlined.Place, place3, onClick = { goPlace3(act) }, onEdit = onPlace3)
-                }
+                if (place3 != null) DestButton(Icons.Outlined.Place, place3, onClick = { goPlace3(act) }, onEdit = onPlace3)
             }
         }
     }
@@ -935,20 +939,15 @@ fun goPlace3(act: MainActivity) {
     if (address.isNotBlank()) navigateTo(act, address) else searchInMaps(act, Prefs.place3Name)
 }
 
-/** Przycisk celu; przytrzymanie = zmiana adresu. */
+/** Przycisk celu (sama ikona; [name] jako opis dla czytnika ekranu); przytrzymanie = zmiana adresu. */
 @Composable
-fun DestButton(icon: ImageVector, name: String, modifier: Modifier = Modifier.fillMaxWidth(), onClick: () -> Unit, onEdit: () -> Unit) {
-    Row(
-        modifier.kokpitSurface(d(18))
-            .combinedClickable(onClick = onClick, onLongClick = onEdit)
-            .padding(horizontal = d(20), vertical = d(16)),
-        verticalAlignment = Alignment.CenterVertically,
+fun DestButton(icon: ImageVector, name: String, onClick: () -> Unit, onEdit: () -> Unit) {
+    Box(
+        Modifier.size(d(72)).kokpitSurface(d(18))
+            .combinedClickable(onClick = onClick, onLongClick = onEdit),
+        contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, null, tint = Accent, modifier = Modifier.size(d(30)))
-        if (name.isNotEmpty()) {
-            Spacer(Modifier.width(d(14)))
-            Text(name, color = Txt, fontSize = s(24), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
+        Icon(icon, name, tint = Accent, modifier = Modifier.size(d(34)))
     }
 }
 
@@ -1145,7 +1144,8 @@ fun ClimateBlock(modifier: Modifier, slot: Slot, act: MainActivity, onSettings: 
         Column(Modifier.fillMaxSize().padding(d(24))) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f)) { Label(Icons.Outlined.AcUnit, st?.name ?: "Klimatyzacja") }
-                if (busy) Text("…", color = Dim, fontSize = s(20))
+                // polecenie czeka na potwierdzenie z urządzenia – przyciski zablokowane
+                if (busy) androidx.compose.material3.CircularProgressIndicator(Modifier.size(d(26)), color = Accent, strokeWidth = d(3))
             }
             val s0 = st
             when {
@@ -1187,32 +1187,25 @@ fun ClimateBlock(modifier: Modifier, slot: Slot, act: MainActivity, onSettings: 
                         )
                     }
                     Spacer(Modifier.weight(1f))
-                    Row(horizontalArrangement = Arrangement.spacedBy(if (slot.w == 1) d(8) else d(10)), verticalAlignment = Alignment.CenterVertically) {
+                    // przyciski dzielą szerokość bloku po równo – zawsze mieszczą się wszystkie (też nawiew w wąskim bloku)
+                    val showFan = slot.h == 1 && s0.fan != null && Tuya.fanValues.isNotEmpty()
+                    val icon = if (slot.w == 1) d(28) else d(32)
+                    Row(Modifier.fillMaxWidth().alpha(if (busy) 0.45f else 1f), horizontalArrangement = Arrangement.spacedBy(if (slot.w == 1) d(8) else d(10)), verticalAlignment = Alignment.CenterVertically) {
+                        val cell = Modifier.weight(1f).height(btn)
                         Box(
-                            Modifier.size(btn).kokpitSurface(d(16), active = s0.on).combinedClickable(onClick = { run { Tuya.setPower(!s0.on) } }),
+                            cell.kokpitSurface(d(16), active = s0.on).combinedClickable(onClick = { run { Tuya.setPower(!s0.on) } }),
                             contentAlignment = Alignment.Center,
-                        ) { Icon(Icons.Outlined.PowerSettingsNew, if (s0.on) "Wyłącz" else "Włącz", tint = if (s0.on) LocalTheme.current.activeText else Txt, modifier = Modifier.size(d(32))) }
+                        ) { Icon(Icons.Outlined.PowerSettingsNew, if (s0.on) "Wyłącz" else "Włącz", tint = if (s0.on) LocalTheme.current.activeText else Txt, modifier = Modifier.size(icon)) }
                         val t = s0.target ?: 22f
-                        Box(Modifier.size(btn).kokpitSurface(d(16)).combinedClickable(onClick = { run { Tuya.setTarget(t - 0.5f) } }), contentAlignment = Alignment.Center) {
-                            Text("−", color = Txt, fontSize = s(34))
+                        Box(cell.kokpitSurface(d(16)).combinedClickable(onClick = { run { Tuya.setTarget(t - 0.5f) } }), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Outlined.Remove, "Chłodniej", tint = Txt, modifier = Modifier.size(icon))
                         }
-                        Box(Modifier.size(btn).kokpitSurface(d(16)).combinedClickable(onClick = { run { Tuya.setTarget(t + 0.5f) } }), contentAlignment = Alignment.Center) {
-                            Text("+", color = Txt, fontSize = s(34))
+                        Box(cell.kokpitSurface(d(16)).combinedClickable(onClick = { run { Tuya.setTarget(t + 0.5f) } }), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Outlined.Add, "Cieplej", tint = Txt, modifier = Modifier.size(icon))
                         }
-                        if (slot.h == 1 && s0.fan != null && Tuya.fanValues.isNotEmpty()) {
-                            val vals = Tuya.fanValues
-                            val fi = vals.indexOf(s0.fan)
-                            Row(
-                                Modifier.height(btn).then(if (slot.w > 1) Modifier.weight(1f) else Modifier).kokpitSurface(d(16))
-                                    .combinedClickable(onClick = { picker = "fan" })
-                                    .padding(horizontal = d(12)),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Icon(Icons.Outlined.Air, "Nawiew", tint = Accent, modifier = Modifier.size(d(26)))
-                                if (slot.w > 1) {
-                                    Spacer(Modifier.width(d(6)))
-                                    Text(Tuya.fanName(s0.fan), color = Txt, fontSize = s(18), maxLines = 1)
-                                }
+                        if (showFan) {
+                            Box(cell.kokpitSurface(d(16)).combinedClickable(onClick = { picker = "fan" }), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Outlined.Air, "Nawiew: " + Tuya.fanName(s0.fan), tint = Accent, modifier = Modifier.size(icon))
                             }
                         }
                     }

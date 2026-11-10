@@ -33,8 +33,14 @@ class MainActivity : ComponentActivity() {
     val cameraWidgetId = mutableIntStateOf(-1)
     /** widżety klocków „Widżet”: numer klocka (Slot.n) → id widżetu */
     val blockWidgets = androidx.compose.runtime.mutableStateMapOf<Int, Int>()
+    /** urządzenia w blokach „Urządzenie Tuya”: numer bloku → id */
+    val tuyaBlockDevices = androidx.compose.runtime.mutableStateMapOf<Int, String>()
+
+    fun setTuyaBlockDevice(n: Int, id: String) {
+        Prefs.setTuyaBlockDevice(n, id)
+        tuyaBlockDevices[n] = id
+    }
     val liveCamera = mutableStateOf("")
-    val carModelPath = mutableStateOf("")
     val layout = mutableStateOf(LayoutStore.DEFAULT)
 
     /** Zwiększany po naciśnięciu "home", żeby UI zamknęło otwarte okna. */
@@ -128,10 +134,6 @@ class MainActivity : ComponentActivity() {
         location.start()
     }
 
-    private val modelPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null && CarModel.import(this, uri)) carModelPath.value = Prefs.carModel
-    }
-
     private val packagesChanged = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) = reloadApps()
     }
@@ -146,11 +148,12 @@ class MainActivity : ComponentActivity() {
         location = LocationRepo(this)
         cameraWidgetId.intValue = Prefs.cameraWidgetId
         liveCamera.value = Prefs.liveCamera
-        CarModel.installDefault(this)
+        removeOldCarModel()
         CanSource.start(this)
-        carModelPath.value = Prefs.carModel
         layout.value = LayoutStore.decode(Prefs.layout)
+        hasSavedLayout.value = Prefs.layoutSaved.isNotBlank()
         layout.value.filter { it.id == BlockId.WIDGET }.forEach { blockWidgets[it.n] = Prefs.blockWidgetId(it.n) }
+        (0..20).forEach { n -> Prefs.tuyaBlockDevice(n).takeIf { it.isNotBlank() }?.let { tuyaBlockDevices[n] = it } }
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).apply {
@@ -250,20 +253,47 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    fun pickCarModel() = modelPicker.launch(arrayOf("*/*"))
-
-    fun restoreCarModel() {
-        if (CarModel.installDefault(this, force = true)) carModelPath.value = Prefs.carModel
+    /** Model 3D auta usunięty w 0.3.13 – sprzątanie pliku .glb skopiowanego przez starsze wersje. */
+    private fun removeOldCarModel() {
+        val path = Prefs.carModel
+        if (path.isNotBlank()) runCatching { java.io.File(path).delete() }
+        runCatching { java.io.File(filesDir, "car.glb").delete() }
+        Prefs.carModel = ""
     }
 
-    fun removeCarModel() {
-        CarModel.remove(this)
-        carModelPath.value = ""
+    /** Czy jest zapisany układ (przycisk „Przywróć zapisany”). */
+    val hasSavedLayout = mutableStateOf(false)
+
+    /** Zapisuje bieżący układ (z liczbą stron) do późniejszego przywrócenia. */
+    fun storeLayout() {
+        Prefs.layoutSaved = "${GridPages.count.intValue}|" + LayoutStore.encode(layout.value)
+        hasSavedLayout.value = true
+    }
+
+    /** Numery klocków „Widżet” z zapisanego układu – ich widżetów nie usuwamy. */
+    private fun savedWidgetBlocks(): Set<Int> {
+        val saved = Prefs.layoutSaved
+        if (!saved.contains('|')) return emptySet()
+        return saved.substringAfter('|').split(';').filter { it.startsWith("WIDGET") }
+            .mapNotNull { it.substringBefore(':').substringAfter('#', "0").toIntOrNull() }.toSet()
+    }
+
+    /** Przywraca zapisany układ; false = nic nie zapisano. */
+    fun restoreLayout(): Boolean {
+        val saved = Prefs.layoutSaved
+        if (saved.isBlank()) return false
+        val pages = saved.substringBefore('|').toIntOrNull()?.coerceIn(1, 3) ?: return false
+        GridPages.count.intValue = pages
+        Prefs.gridPages = pages
+        saveLayout(LayoutStore.decode(saved.substringAfter('|')))
+        return true
     }
 
     fun saveLayout(slots: List<Slot>) {
         // ukryty klocek „Widżet” zwalnia swój widżet; ponowne dodanie zaczyna od wyboru
-        val kept = slots.filter { it.id == BlockId.WIDGET }.map { it.n }.toSet()
+        // (widżety z zapisanego układu zostają – wrócą przy przywróceniu)
+        val savedKeys = savedWidgetBlocks()
+        val kept = slots.filter { it.id == BlockId.WIDGET }.map { it.n }.toSet() + savedKeys
         layout.value.filter { it.id == BlockId.WIDGET && it.n !in kept }.forEach { removeBlockWidget(it.n) }
         layout.value = slots
         Prefs.layout = LayoutStore.encode(slots)

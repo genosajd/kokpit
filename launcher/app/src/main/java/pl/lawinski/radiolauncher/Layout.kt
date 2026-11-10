@@ -54,6 +54,7 @@ enum class BlockId(val title: String, val minW: Int, val minH: Int, val multi: B
     WIDGET("Widżet", 1, 1, multi = true),
     ASSISTANT("Asystent", 1, 1),
     CLIMATE("Klima", 1, 1),
+    TUYA("Urządzenie Tuya", 1, 1, multi = true),
 }
 
 /** Położenie klocka na siatce 8 × 2: kolumna, rząd, szerokość, wysokość; n = numer egzemplarza. */
@@ -176,12 +177,15 @@ object LayoutStore {
             val s = Slot(id, c, r, id.minW, id.minH, n)
             if (fits(slots, s)) return slots + s
         }
-        // siatka pełna: zwęź najszerszy klocek o jedną kolumnę z prawej i wstaw nowy w zwolnione miejsce
-        val wide = slots.filter { it.w > it.id.minW }.maxByOrNull { it.w } ?: return null
-        val narrowed = wide.copy(w = wide.w - 1)
-        val s = Slot(id, wide.c + wide.w - 1, wide.r, 1, wide.h, n)
-        val next = slots.map { if (it == wide) narrowed else it } + s
-        return if (s.inBounds && next.none { a -> next.any { b -> a !== b && a.overlaps(b) } }) next else null
+        // siatka pełna: zwęź szeroki klocek o jedną kolumnę z prawej i wstaw nowy w zwolnione miejsce
+        // (od najszerszego; pierwszy, przy którym nowy klocek się mieści)
+        for (wide in slots.filter { it.w > it.id.minW }.sortedByDescending { it.w }) {
+            val narrowed = wide.copy(w = wide.w - 1)
+            val s = Slot(id, wide.c + wide.w - 1, wide.r, id.minW, wide.h.coerceAtLeast(id.minH), n)
+            val next = slots.map { if (it.same(wide)) narrowed else it } + s
+            if (s.inBounds && next.indices.all { i -> (i + 1 until next.size).none { j -> next[i].overlaps(next[j]) } }) return next
+        }
+        return null
     }
 }
 
@@ -215,6 +219,18 @@ fun BlockGrid(
             if (scrolling && !edit && !scroll.isScrollInProgress) {
                 val target = (kotlin.math.round(scroll.value / colStep) * colStep).toInt().coerceIn(0, scroll.maxValue)
                 if (target != scroll.value) scroll.animateScrollTo(target)
+            }
+        }
+        // nowy klocek (np. dodany w edycji na innej stronie) – przewiń, żeby był widoczny
+        val known = remember { mutableStateOf(slots.map { it.key }.toSet()) }
+        androidx.compose.runtime.LaunchedEffect(slots) {
+            val added = slots.filter { it.key !in known.value }
+            known.value = slots.map { it.key }.toSet()
+            val s = added.firstOrNull() ?: return@LaunchedEffect
+            if (scrolling) {
+                val x = (s.c * colStep).toInt()
+                if (x < scroll.value || x + s.w * colStep > scroll.value + with(density) { pageW.toPx() })
+                    scroll.animateScrollTo((x - colStep.toInt() * (8 - s.w).coerceAtLeast(0) / 2).coerceIn(0, scroll.maxValue))
             }
         }
         val cellH = (maxHeight - gap * (GRID_ROWS - 1)) / GRID_ROWS

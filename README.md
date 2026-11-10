@@ -9,16 +9,17 @@ Kotlin + Jetpack Compose, ekran 2560x720.
 - Skróty przestawia się przytrzymaniem i przeciągnięciem; obsługa pokrętłem iDrive z wyraźnym zaznaczeniem.
 - Wygląd do wyboru w Ustawieniach: Płaski oraz animowane BMW iDrive (niebieski) i M Sport (czerwony), tryb ciemny albo jasny; każdy wygląd można dostosować (kolor poświaty, tła i akcentu, krój i rozmiar pisma). Nowy wygląd to jeden wpis w `Themes.kt`.
 - **Dane z auta przez moduł CAN radia:** paliwo w litrach, otwarte drzwi i klapa (widok z góry), bieg, ostrzeżenie o niezapiętym pasie (domyślnie wyłączone), temperatura zewnętrzna, prędkość (awaryjnie z GPS).
-- Zdjęcie auta albo model 3D obracany palcem (Filament).
+- Zdjęcie białego F11 w bloku auta (przy otwartych drzwiach widok z góry).
 - Trasa z powiadomień Map Google i Waze; przyciski Dom i Praca otwierają miejsca zapisane w Mapach, plus trzecie miejsce z własną nazwą (np. etykieta z Map).
 - **Blok „Asystent” (AI):** rozmowa z Claude (Anthropic) albo OpenAI, głosem lub pisaniem, odpowiedzi czytane na głos (głosy Google albo OpenAI). Zna stan auta, włącza nawigację, uruchamia i steruje YouTube/odtwarzaczem, zmienia głośność, jasność i wygląd, czyta i dopisuje terminy w kalendarzu Google (konto zalogowane w radiu), robi zdjęcie z kamery Xiaomi i opisuje je, obraca kamerą (punkty, zoom – wymaga Xiaomi Cam 1.35+). Wywołanie też przyciskiem asystenta (np. na kierownicy) – okienko asystenta nad dowolną aplikacją; przy pierwszym naciśnięciu wybierz „Kokpit F11 – Zawsze”. Gdy asystent mówi, muzyka jest ściszana. Klucz API wpisuje się w Ustawieniach → Asystent AI i zostaje tylko w radiu; za zapytania płaci się u dostawcy.
-- **Blok „Klima”:** klimatyzator ze Smart Life przez chmurę Tuya (darmowy projekt na platform.tuya.com, klucze w Ustawieniach → Dom) – temperatura i wilgotność w domu z czujnika Tuya (np. „T & H Sensor”; wybór w Ustawieniach → Dom), obok odczyt klimatyzatora, wł./wył., temperatura, tryb i nawiew; asystent też nim steruje.
-- Ekran może mieć do 3 stron przewijanych w bok (Ustawienia → Ekran); przyciski reagują widocznym wciśnięciem.
+- **Blok „Klima”:** klimatyzator ze Smart Life przez chmurę Tuya (darmowy projekt na platform.tuya.com, klucze w Ustawieniach → Dom) – temperatura i wilgotność w domu z czujnika Tuya (np. „T & H Sensor”; wybór w Ustawieniach → Dom), obok odczyt klimatyzatora, wł./wył., temperatura, tryb i nawiew; asystent też nim steruje. Po poleceniu przyciski czekają, aż urządzenie potwierdzi wykonanie.
+- **Blok „Urządzenie Tuya”** (można dodać kilka): dowolne urządzenie z projektu Tuya wybrane przyciskiem „Zmień” w edycji układu – włączniki, jasność, tryb oraz odczyty temperatury, wilgotności, mocy i baterii.
+- Ekran może mieć do 3 stron przewijanych w bok (Ustawienia → Ekran); przyciski reagują widocznym wciśnięciem. Układ można zapisać i przywrócić w edycji układu („Zapisz układ” / „Przywróć zapisany”).
 - **Hasło „OK BMW”** (Ustawienia → Asystent AI, domyślnie wyłączone): rozpoznawane w całości w radiu, bez internetu i zewnętrznych usług (Vosk, polski model). Wyłączone nie zużywa mikrofonu ani procesora. Słucha też przy muzyce (z systemowym usuwaniem echa, jeśli radio je ma); nie słucha tylko, gdy mówi asystent. Czułość do wyboru (niska/średnia/wysoka). Wymaga zgody na mikrofon i na wyświetlanie nad innymi aplikacjami.
 - Asystent ma własne instrukcje (np. jak się do Ciebie zwracać) w Ustawieniach → Asystent AI.
 - Rozmowa z asystentem zostaje po restarcie radia. Zaczyna się od nowa po przekroczeniu limitu tokenów (Ustawienia → Asystent AI, domyślnie 500 tys.) albo przyciskiem odświeżenia w bloku.
 - Podgląd kamery Xiaomi na żywo (RTSP z aplikacji Xiaomi Cam z serwerem w tle); gdy dekoder sprzętowy nie da rady, przełącza się na programowy.
-- Górny pasek: zasięg sieci komórkowej (LTE/5G/3G) i Wi-Fi, brak internetu, stan akumulatora (napięcie, jeśli radio je podaje).
+- Górny pasek: zasięg sieci komórkowej (LTE/5G/3G) i Wi-Fi, brak internetu, stan akumulatora (napięcie, jeśli radio je podaje) i głośność z suwakiem.
 - Przycisk „iDrive” (oryginalny ekran BMW) i „Radio” (ustawienia Witstek).
 - Podzielony ekran Mapy + YouTube.
 

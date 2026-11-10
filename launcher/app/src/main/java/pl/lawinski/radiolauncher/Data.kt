@@ -68,21 +68,29 @@ object Prefs {
     fun setBlockWidgetId(n: Int, v: Int) = sp.edit().putInt(blockWidgetKey(n), v).apply()
     private fun blockWidgetKey(n: Int) = if (n == 0) "block_widget" else "block_widget_$n"
 
+    /** urządzenie Tuya w bloku „Urządzenie Tuya” nr n */
+    fun tuyaBlockDevice(n: Int) = sp.getString("tuya_block_$n", "") ?: ""
+    fun setTuyaBlockDevice(n: Int, id: String) = sp.edit().putString("tuya_block_$n", id).apply()
+
     var layout: String?
         get() = sp.getString("layout", null)
         set(v) = sp.edit().putString("layout", v).apply()
+
+    /** Zapisany przez użytkownika układ do przywrócenia: "strony|układ" (pusty = brak). */
+    var layoutSaved: String
+        get() = sp.getString("layout_saved", "") ?: ""
+        set(v) = sp.edit().putString("layout_saved", v).apply()
 
     /** Nazwa kamery do podglądu na żywo z Xiaomi Cam; pusta = pokazuj widżet. */
     var liveCamera: String
         get() = sp.getString("live_camera", "") ?: ""
         set(v) = sp.edit().putString("live_camera", v).apply()
 
-    /** Ścieżka do własnego modelu 3D auta (.glb) skopiowanego do plików aplikacji. */
+    /** Ścieżka do modelu 3D auta ze starszych wersji (do sprzątnięcia; model 3D usunięty w 0.3.13). */
     var carModel: String
         get() = sp.getString("car_model", "") ?: ""
         set(v) = sp.edit().putString("car_model", v).apply()
 
-    /** Model 3D zamiast zdjęcia auta; domyślnie zdjęcie 2D (3D na radiu nie jest płynne). */
     /** ostatnio otwarta grupa w Ustawieniach */
     var settingsGroup: Int
         get() = sp.getInt("settings_group", 0)
@@ -182,13 +190,7 @@ object Prefs {
         get() = sp.getBoolean("belt_warn", false)
         set(v) = sp.edit().putBoolean("belt_warn", v).apply()
 
-    var show3d: Boolean
-        get() = sp.getBoolean("show_3d", false)
-        set(v) = sp.edit().putBoolean("show_3d", v).apply()
 
-    var carModelInitialized: Boolean
-        get() = sp.getBoolean("car_model_init", false)
-        set(v) = sp.edit().putBoolean("car_model_init", v).apply()
 
     var splitLeft: String
         get() = sp.getString("split_left", "com.google.android.apps.maps") ?: ""

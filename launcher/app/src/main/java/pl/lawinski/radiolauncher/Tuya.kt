@@ -166,9 +166,9 @@ object Tuya {
             val id = deviceId()
             val code = fanCode ?: return@withContext "Ten klimatyzator nie ma regulacji nawiewu"
             call("POST", "/v2.0/cloud/thing/$id/shadow/properties/issue", JSONObject().put("properties", JSONObject().put(code, value).toString()).toString())
-            kotlinx.coroutines.delay(1500)
+            val done = waitFor(id, mapOf(code to value), shadow = true)
             refresh()
-            "ok"
+            if (done) "ok" else notConfirmed().also { error.value = it }
         } catch (e: Exception) {
             describe(e).also { error.value = it }
         }
@@ -292,15 +292,118 @@ object Tuya {
             val id = deviceId()
             val arr = JSONArray().apply { cmds.forEach { (k, v) -> put(JSONObject().put("code", k).put("value", v)) } }
             call("POST", "/v1.0/devices/$id/commands", JSONObject().put("commands", arr).toString())
-            kotlinx.coroutines.delay(1500)
+            val done = waitFor(id, cmds.toMap())
             refresh()
-            "ok"
+            if (done) "ok" else notConfirmed().also { error.value = it }
         } catch (e: Exception) {
             describe(e).also { error.value = it }
         }
     }
 
     suspend fun setPower(on: Boolean) = send("switch" to on)
+
+    /*
+     * Potwierdzenie wykonania: chmura przyjmuje polecenie od razu, ale urządzenie wykonuje je po chwili.
+     * Odczytujemy stan co sekundę, aż wartości zgadzają się z poleceniem (najwyżej [timeoutMs]).
+     * Przez ten czas przyciski w blokach są zablokowane.
+     */
+    private suspend fun waitFor(id: String, expected: Map<String, Any>, shadow: Boolean = false, timeoutMs: Long = 20_000): Boolean {
+        val end = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < end) {
+            kotlinx.coroutines.delay(1000)
+            val now = runCatching { if (shadow) shadowValues(id, expected.keys) else statusMap(id) }.getOrNull() ?: continue
+            if (expected.all { (k, v) -> same(now[k], v) }) return true
+        }
+        android.util.Log.w("Tuya", "brak potwierdzenia $expected")
+        return false
+    }
+
+    private fun same(a: Any?, b: Any): Boolean = when {
+        a == null -> false
+        a is Number && b is Number -> a.toDouble() == b.toDouble()
+        else -> a.toString().equals(b.toString(), true)
+    }
+
+    private fun notConfirmed() = "Urządzenie nie potwierdziło polecenia – sprawdź, czy jest online"
+
+    private fun statusMap(id: String): Map<String, Any> {
+        val st = call("GET", "/v1.0/devices/$id/status").getJSONArray("result")
+        return (0 until st.length()).associate { st.getJSONObject(it).let { o -> o.getString("code") to o.get("value") } }
+    }
+
+    private fun shadowValues(id: String, codes: Collection<String>): Map<String, Any> {
+        val props = call("GET", "/v2.0/cloud/thing/$id/shadow/properties?codes=${codes.joinToString(",")}").getJSONObject("result").optJSONArray("properties") ?: return emptyMap()
+        return (0 until props.length()).map { props.getJSONObject(it) }.filter { it.has("value") }.associate { it.optString("code") to it.get("value") }
+    }
+
+    // ---------- dowolne urządzenie (blok „Urządzenie Tuya”) ----------
+
+    data class Device(val id: String, val name: String, val category: String, val online: Boolean)
+
+    /** Funkcja urządzenia: kod, typ (Boolean/Integer/Enum/…) i opis wartości (min/max/scale/unit albo range). */
+    data class Function(val code: String, val type: String, val values: JSONObject)
+
+    data class DeviceState(
+        val id: String,
+        val name: String,
+        val category: String,
+        val online: Boolean,
+        val status: Map<String, Any>,
+        /** funkcje, którymi można sterować */
+        val functions: List<Function>,
+        /** opis odczytów (skala, jednostka) */
+        val specs: Map<String, JSONObject>,
+    )
+
+    /** Urządzenia z projektu Tuya (do wyboru w bloku). */
+    suspend fun devices(): List<Device> = withContext(Dispatchers.IO) {
+        val list = call("GET", "/v2.0/cloud/thing/device?page_size=20").optJSONArray("result") ?: JSONArray()
+        (0 until list.length()).map { list.getJSONObject(it) }.map {
+            // nazwa nadana w Smart Life (np. „Klima salon”), a bez niej nazwa produktu
+            val name = it.optString("customName").ifBlank { it.optString("name") }.ifBlank { "Urządzenie" }
+            Device(it.getString("id"), name, it.optString("category"), it.optBoolean("isOnline", it.optBoolean("online", true)))
+        }
+    }
+
+    private val specCache = HashMap<String, Pair<List<Function>, Map<String, JSONObject>>>()
+
+    private fun specsOf(id: String) = specCache.getOrPut(id) {
+        val r = call("GET", "/v1.0/devices/$id/specifications").getJSONObject("result")
+        fun vals(o: JSONObject) = runCatching { JSONObject(o.optString("values", "{}")) }.getOrDefault(JSONObject())
+        val f = r.optJSONArray("functions")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } }.orEmpty()
+            .map { Function(it.optString("code"), it.optString("type"), vals(it)) }
+        val st = r.optJSONArray("status")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } }.orEmpty()
+            .associate { it.optString("code") to vals(it) }
+        f to st
+    }
+
+    suspend fun readDevice(id: String): DeviceState = withContext(Dispatchers.IO) {
+        val (functions, specs) = specsOf(id)
+        val info = runCatching { call("GET", "/v1.0/devices/$id").getJSONObject("result") }.getOrNull()
+        DeviceState(
+            id = id,
+            name = info?.optString("name")?.takeIf { it.isNotBlank() } ?: "Urządzenie",
+            category = info?.optString("category").orEmpty(),
+            online = info?.optBoolean("online", true) ?: true,
+            status = statusMap(id),
+            functions = functions,
+            specs = specs,
+        )
+    }
+
+    /** Polecenie dla dowolnego urządzenia; wraca po potwierdzeniu (null = ok, inaczej opis błędu). */
+    suspend fun command(id: String, code: String, value: Any): String? = withContext(Dispatchers.IO) {
+        try {
+            val arr = JSONArray().put(JSONObject().put("code", code).put("value", value))
+            call("POST", "/v1.0/devices/$id/commands", JSONObject().put("commands", arr).toString())
+            if (waitFor(id, mapOf(code to value))) null else notConfirmed()
+        } catch (e: Exception) {
+            describe(e)
+        }
+    }
+
+    /** Opis błędu do pokazania w bloku. */
+    fun errorText(e: Exception) = describe(e)
 
     /** Temperatura 16–31 °C co 0,5 °C. */
     suspend fun setTarget(c: Float) = send("temp_set" to ((c.coerceIn(16f, 31f) * 2).toInt() * 5))
@@ -313,7 +416,7 @@ object Tuya {
 
     private fun describe(e: Exception): String = when {
         e is TuyaError && e.code == 1004 -> "Zły Access Secret Tuya (Ustawienia → Dom)"
-        e is TuyaError && (e.code == 1106 || e.code == 2017) -> "Brak uprawnień – w projekcie Tuya ustaw klimatyzator na „Controllable”"
+        e is TuyaError && (e.code == 1106 || e.code == 2017) -> "Brak uprawnień – w projekcie Tuya ustaw urządzenie na „Controllable”"
         e is TuyaError && e.code == 28841105 -> "Darmowy okres API Tuya minął – przedłuż IoT Core na platform.tuya.com"
         e is TuyaError -> "Tuya: ${e.message} (${e.code})"
         e is java.io.IOException -> "Brak połączenia z internetem"
