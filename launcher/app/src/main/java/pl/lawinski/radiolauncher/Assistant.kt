@@ -117,6 +117,19 @@ private object AssistantTools {
             listOf("action", "value"),
         ),
         Def(
+            "calendar",
+            "Kalendarz Google właściciela (zsynchronizowany w radiu). list = terminy od dnia date (RRRR-MM-DD, pusty = dziś) przez days dni; zwraca też dzisiejszą datę i godzinę. add = nowy termin: title, date = początek „RRRR-MM-DD GG:MM” (sama data = cały dzień), minutes = czas trwania, location = miejsce (może być puste). Przed add, gdy nie znasz dzisiejszej daty (np. „jutro”), najpierw wywołaj list. Gdy termin ma miejsce, a ktoś chce tam jechać, użyj navigate.",
+            mapOf(
+                "action" to mapOf("type" to "string", "enum" to listOf("list", "add")),
+                "date" to mapOf("type" to "string", "description" to "list: pierwszy dzień RRRR-MM-DD albo pusty; add: RRRR-MM-DD GG:MM albo RRRR-MM-DD"),
+                "days" to mapOf("type" to "integer", "description" to "list: liczba dni (1 = jeden dzień, 7 = tydzień); add: 0"),
+                "title" to mapOf("type" to "string", "description" to "add: tytuł terminu; list: pusty"),
+                "minutes" to mapOf("type" to "integer", "description" to "add: czas trwania w minutach (np. 60); list: 0"),
+                "location" to mapOf("type" to "string", "description" to "add: miejsce albo pusty; list: pusty"),
+            ),
+            listOf("action", "date", "days", "title", "minutes", "location"),
+        ),
+        Def(
             "radio_control",
             "Obsługa radia i Kokpitu. action: volume_set (value 0–100 %), volume_up, volume_down, mute, unmute, brightness_set (value 0–100 %), idrive_screen (oryginalny ekran BMW iDrive), split_screen (Mapy + YouTube obok siebie), radio_settings (ustawienia radia Witstek), android_settings, home (ekran Kokpitu), theme (value: 0 = Płaski, 1 = BMW iDrive, 2 = M Sport), status (głośność i jasność). Dla akcji bez liczby podaj value 0.",
             mapOf(
@@ -184,6 +197,7 @@ private object AssistantTools {
         "play_youtube" -> playYoutube(act, input.optString("query").trim())
         "media_control" -> mediaControl(act, input.optString("action"), input.optString("app").trim())
         "camera_control" -> cameraControl(act, input)
+        "calendar" -> calendar(act, input)
         "home_ac" -> homeAc(input.optString("action"), input.optDouble("value", 0.0))
         "radio_control" -> radioControl(act, input.optString("action"), input.optInt("value"))
         "open_app" -> openApp(act, input.optString("app").trim(), input.optString("search").trim())
@@ -191,6 +205,15 @@ private object AssistantTools {
     }
 
     private const val YOUTUBE = "com.google.android.youtube"
+
+    private fun calendar(act: MainActivity, input: JSONObject): String {
+        if (!KokpitCalendar.granted(act) && !act.requestPermissionsBlocking(KokpitCalendar.PERMISSIONS))
+            return "Brak zgody na dostęp do kalendarza – na ekranie radia trzeba zezwolić Kokpitowi na kalendarz."
+        return when (input.optString("action")) {
+            "add" -> KokpitCalendar.add(act, input.optString("title"), input.optString("date"), input.optInt("minutes", 60).takeIf { it > 0 } ?: 60, input.optString("location"))
+            else -> KokpitCalendar.list(act, input.optString("date"), input.optInt("days", 1).coerceAtLeast(1))
+        }
+    }
 
     /** Pierwszy film z wyników wyszukiwania YouTube (strona www, bez klucza API) i odtworzenie go w aplikacji. */
     private fun playYoutube(act: MainActivity, query: String): String {
@@ -325,7 +348,10 @@ private object AssistantTools {
         }
         if (r != "ok") return@runBlocking r
         val s = Tuya.state.value ?: Tuya.refresh() ?: return@runBlocking Tuya.error.value ?: "Brak odczytu klimatyzatora"
-        "${s.name}: ${if (!s.online) "offline" else if (s.on) "włączony, ${Tuya.modeName(s.mode)}, ustawione ${s.target} °C" else "wyłączony"}; w domu ${s.room ?: "?"} °C, wilgotność ${s.humidity ?: "?"} %" +
+        val sn = Tuya.sensor.value
+        "${s.name}: ${if (!s.online) "offline" else if (s.on) "włączony, ${Tuya.modeName(s.mode)}, ustawione ${s.target} °C" else "wyłączony"}; " +
+            (if (sn?.temp != null) "w domu ${sn.temp} °C, wilgotność ${sn.humidity ?: s.humidity ?: "?"} % (czujnik „${sn.name}” – to jest prawdziwa temperatura w pokoju; czujnik klimatyzatora pokazuje zawyżone ${s.room ?: "?"} °C)"
+            else "w domu ${s.room ?: "?"} °C, wilgotność ${s.humidity ?: "?"} %") +
             (if (s.fan != null) "; nawiew ${Tuya.fanName(s.fan)} (lista: ${Tuya.fanValues.mapIndexed { i, v -> "$i ${Tuya.fanName(v)}" }.joinToString()})" else "")
     }
 
@@ -427,7 +453,7 @@ private object AssistantTools {
 private const val BASE_PROMPT = """Jesteś asystentem w aucie: ekran radia w BMW F11 Touring z launcherem Kokpit F11. Rozmawia z Tobą kierowca albo pasażer.
 Odpowiadaj po polsku, krótko i naturalnie, zwykle 1–3 zdaniami – odpowiedzi są czytane na głos, więc pisz zwykłym tekstem, bez list, nagłówków, tabel i znaczników Markdown.
 Kierowca nie powinien czytać długich tekstów w czasie jazdy, dlatego najważniejsze mów na początku.
-Masz narzędzia: car_status (stan auta, położenie, trasa), navigate i open_saved_place (włączają nawigację w Mapach Google), open_app (uruchamia aplikację w radiu i może w niej wyszukać), play_youtube (od razu odtwarza w YouTube to, o co ktoś prosi), media_control (pauza, wznowienie, następny, poprzedni, co teraz gra) i radio_control (głośność, jasność, ekran BMW iDrive, podzielony ekran, ustawienia, wygląd Kokpitu) camera_control (obrót kamery, punkty, zoom), home_ac (klimatyzator w domu: temperatura, wł./wył., ustawienie) i camera_snapshot (aktualne zdjęcie z kamery Xiaomi – gdy ktoś pyta, co widać na kamerze, zawsze zrób nowe zdjęcie). Gdy ktoś prosi o włączenie muzyki lub filmu, użyj play_youtube. Gdy pytanie dotyczy auta, paliwa, miejsca albo trasy, najpierw sprawdź car_status. Gdy ktoś prosi o trasę, od razu włącz nawigację i krótko to potwierdź."""
+Masz narzędzia: car_status (stan auta, położenie, trasa), navigate i open_saved_place (włączają nawigację w Mapach Google), open_app (uruchamia aplikację w radiu i może w niej wyszukać), play_youtube (od razu odtwarza w YouTube to, o co ktoś prosi), media_control (pauza, wznowienie, następny, poprzedni, co teraz gra) i radio_control (głośność, jasność, ekran BMW iDrive, podzielony ekran, ustawienia, wygląd Kokpitu) camera_control (obrót kamery, punkty, zoom), home_ac (klimatyzator w domu: temperatura, wł./wył., ustawienie), calendar (kalendarz Google właściciela: terminy i dodawanie nowych) i camera_snapshot (aktualne zdjęcie z kamery Xiaomi – gdy ktoś pyta, co widać na kamerze, zawsze zrób nowe zdjęcie). Gdy ktoś prosi o włączenie muzyki lub filmu, użyj play_youtube. Gdy pytanie dotyczy auta, paliwa, miejsca albo trasy, najpierw sprawdź car_status. Gdy ktoś prosi o trasę, od razu włącz nawigację i krótko to potwierdź."""
 
 /** Prompt systemowy: stały opis roli + instrukcje właściciela z Ustawień (jak się zwracać, styl…). */
 private fun systemPrompt(): String {

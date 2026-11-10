@@ -107,6 +107,11 @@ object Prefs {
         get() = sp.getString("tuya_device_name", "") ?: ""
         set(v) = sp.edit().putString("tuya_device_name", v).apply()
 
+    /** czujnik temperatury w domu (Tuya): "" = sam wybierz (najpierw „T & H”), "-" = bez czujnika, inaczej id */
+    var tuyaSensor: String
+        get() = sp.getString("tuya_sensor", "") ?: ""
+        set(v) = sp.edit().putString("tuya_sensor", v).apply()
+
     /** Liczba stron ekranu głównego (1–3), przewijanych w bok */
     var gridPages: Int
         get() = sp.getInt("grid_pages", 1)

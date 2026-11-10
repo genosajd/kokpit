@@ -34,11 +34,20 @@ data class AcState(
     val fan: String? = null,
 )
 
+/** Czujnik temperatury i wilgotności w domu (np. „T & H Sensor”) – dokładniejszy niż czujnik w klimatyzatorze. */
+data class SensorState(val id: String, val name: String, val temp: Float?, val humidity: Int?, val battery: Int?, val online: Boolean)
+
 object Tuya {
     /** EU = Central Europe Data Center */
     private const val HOST = "https://openapi.tuyaeu.com"
 
     val state = MutableStateFlow<AcState?>(null)
+    val sensor = MutableStateFlow<SensorState?>(null)
+
+    /** czujniki temperatury w projekcie Tuya: id → nazwa (do wyboru w Ustawieniach) */
+    var sensors: List<Pair<String, String>> = emptyList()
+        private set
+    private var sensorsChecked = false
     val error = MutableStateFlow<String?>(null)
 
     private var token: String? = null
@@ -179,6 +188,69 @@ object Tuya {
         else -> v
     }
 
+    /** kategorie Tuya czujników temperatury: wsdcg = temp./wilg., wnykq = pilot IR z czujnikiem, co2bj/hjjcy = jakość powietrza */
+    private val SENSOR_CATEGORIES = setOf("wsdcg", "wnykq", "co2bj", "hjjcy", "ywbj")
+
+    private fun findSensors() {
+        if (sensorsChecked) return
+        val list = call("GET", "/v2.0/cloud/thing/device?page_size=20").optJSONArray("result") ?: JSONArray()
+        sensors = (0 until list.length()).map { list.getJSONObject(it) }
+            .filter { it.optString("category") in SENSOR_CATEGORIES || it.optString("name").contains("T & H", true) || it.optString("name").contains("T&H", true) }
+            .map { it.getString("id") to it.optString("name", it.optString("customName", "Czujnik")) }
+        sensorsChecked = true
+        android.util.Log.i("Tuya", "czujniki: $sensors")
+    }
+
+    private fun sensorId(): String? {
+        val p = Prefs.tuyaSensor
+        if (p == "-") return null
+        if (p.isNotBlank()) return p
+        findSensors()
+        return (sensors.firstOrNull { it.second.contains("T & H", true) || it.second.contains("T&H", true) } ?: sensors.firstOrNull())?.first
+    }
+
+    /** skala liczb z opisu funkcji urządzenia (np. va_temperature 215 przy scale 1 = 21,5 °C) */
+    private val scales = HashMap<String, Map<String, Int>>()
+
+    private fun scalesOf(id: String): Map<String, Int> = scales.getOrPut(id) {
+        runCatching {
+            val st = call("GET", "/v1.0/devices/$id/specifications").getJSONObject("result").optJSONArray("status") ?: JSONArray()
+            (0 until st.length()).map { st.getJSONObject(it) }.associate { o ->
+                o.optString("code") to (runCatching { JSONObject(o.optString("values")).optInt("scale", 0) }.getOrDefault(0))
+            }
+        }.getOrDefault(emptyMap())
+    }
+
+    private fun readSensor() {
+        val id = sensorId() ?: run { sensor.value = null; return }
+        val st = call("GET", "/v1.0/devices/$id/status").getJSONArray("result")
+        val m = (0 until st.length()).associate { st.getJSONObject(it).let { o -> o.getString("code") to o.get("value") } }
+        val sc = scalesOf(id)
+        fun num(vararg codes: String): Float? {
+            val c = codes.firstOrNull { m[it] is Number } ?: return null
+            val v = (m[c] as Number).toFloat()
+            // bez opisu skali: czujniki Tuya zwykle podają temperaturę ×10
+            val scale = sc[c] ?: if (c.contains("temp") && v > 60) 1 else 0
+            return v / Math.pow(10.0, scale.toDouble()).toFloat()
+        }
+        val info = runCatching { call("GET", "/v1.0/devices/$id").getJSONObject("result") }.getOrNull()
+        val name = info?.optString("name")?.takeIf { it.isNotBlank() } ?: sensors.firstOrNull { it.first == id }?.second ?: "Czujnik"
+        sensor.value = SensorState(
+            id = id,
+            name = name,
+            temp = num("va_temperature", "temp_current", "temp_value", "temperature"),
+            humidity = num("va_humidity", "humidity_value", "humidity_current", "humidity")?.toInt(),
+            battery = (m["battery_percentage"] as? Number)?.toInt(),
+            online = info?.optBoolean("online", true) ?: true,
+        )
+    }
+
+    /** Lista czujników do Ustawień (wywoływać poza wątkiem UI). */
+    suspend fun sensorList(): List<Pair<String, String>> = withContext(Dispatchers.IO) {
+        runCatching { findSensors() }
+        sensors
+    }
+
     /** Odświeża stan (wywoływać poza wątkiem UI). */
     suspend fun refresh(): AcState? = withContext(Dispatchers.IO) {
         if (!configured) return@withContext null
@@ -205,6 +277,8 @@ object Tuya {
             )
             state.value = s
             error.value = null
+            // czujnik w pokoju – błąd czujnika nie psuje odczytu klimatyzatora
+            runCatching { readSensor() }.onFailure { android.util.Log.w("Tuya", "czujnik: ${it.message}") }
             s
         } catch (e: Exception) {
             error.value = describe(e)
@@ -254,6 +328,10 @@ object Tuya {
         fanChecked = false
         fanCode = null
         fanValues = emptyList()
+        sensorsChecked = false
+        sensors = emptyList()
+        scales.clear()
+        sensor.value = null
         state.value = null
         error.value = null
     }

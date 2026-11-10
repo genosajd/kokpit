@@ -461,6 +461,8 @@ fun StatusBar(onSettings: () -> Unit, onEdit: () -> Unit, editAllowed: Boolean) 
             Text(outside, color = Dim, fontSize = s(26))
         }
         Spacer(Modifier.weight(1f))
+        SystemIcons()
+        Spacer(Modifier.width(d(26)))
         val ctx = LocalContext.current
         Pill(Icons.Outlined.Tune, "Radio", onClick = { openRadioSettings(ctx) })
         Spacer(Modifier.width(d(14)))
@@ -1089,6 +1091,7 @@ private fun modeIcon(m: String?): ImageVector = when (m) {
 @Composable
 fun ClimateBlock(modifier: Modifier, slot: Slot, act: MainActivity, onSettings: () -> Unit) {
     val st by Tuya.state.collectAsState()
+    val sens by Tuya.sensor.collectAsState()
     val err by Tuya.error.collectAsState()
     val visible by act.visible
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -1155,11 +1158,15 @@ fun ClimateBlock(modifier: Modifier, slot: Slot, act: MainActivity, onSettings: 
                 }
                 else -> {
                     Spacer(Modifier.weight(1f))
+                    // temperatura z czujnika w pokoju (dokładniejsza), czujnik klimatyzatora mniejszym tekstem
+                    val room = sens?.temp
                     Row(verticalAlignment = Alignment.Bottom) {
-                        Text(s0.room?.let { "${it.toInt()}°" } ?: "–", color = Txt, fontSize = s(if (slot.h > 1) 92 else 64), fontWeight = FontWeight.Light)
+                        Text((room ?: s0.room)?.let { if (room != null) "%.1f°".format(it).replace('.', ',') else "${it.toInt()}°" } ?: "–",
+                            color = Txt, fontSize = s(if (slot.h > 1) 92 else 64), fontWeight = FontWeight.Light)
                         Column(Modifier.padding(start = d(14), bottom = d(14))) {
                             Text("w domu", color = Dim, fontSize = s(18))
-                            s0.humidity?.let { Text("wilg. $it %", color = Dim, fontSize = s(18)) }
+                            (sens?.humidity ?: s0.humidity)?.let { Text("wilg. $it %", color = Dim, fontSize = s(18)) }
+                            if (room != null && s0.room != null) Text("klima ${s0.room.toInt()}°", color = Dim, fontSize = s(18))
                         }
                     }
                     // tryb jako przycisk: dotknięcie otwiera wybór (grzanie, chłodzenie, auto…)

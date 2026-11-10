@@ -105,6 +105,25 @@ class MainActivity : ComponentActivity() {
         micLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
 
+    private var onPerms: ((Boolean) -> Unit)? = null
+    private val permsLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
+        onPerms?.invoke(r.values.all { it })
+        onPerms = null
+    }
+
+    /** Zgoda pytana z wątku narzędzia asystenta: okienko Androida na ekranie, czeka na odpowiedź (maks. 60 s). */
+    fun requestPermissionsBlocking(perms: Array<String>): Boolean {
+        if (perms.all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }) return true
+        val latch = java.util.concurrent.CountDownLatch(1)
+        var ok = false
+        runOnUiThread {
+            onPerms = { ok = it; latch.countDown() }
+            runCatching { permsLauncher.launch(perms) }.onFailure { latch.countDown() }
+        }
+        latch.await(60, java.util.concurrent.TimeUnit.SECONDS)
+        return ok
+    }
+
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         location.start()
     }

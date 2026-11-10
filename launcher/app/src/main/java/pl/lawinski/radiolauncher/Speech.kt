@@ -2,8 +2,11 @@ package pl.lawinski.radiolauncher
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,6 +25,7 @@ import java.util.Locale
  *  - SYSTEM: silnik mowy Androida (Google); głos polski do wyboru, „sieciowe” brzmią najnaturalniej.
  *  - OPENAI: głos z OpenAI (/v1/audio/speech) – najbardziej ludzki, płatny, potrzebuje klucza OpenAI.
  *    Gdy się nie uda (brak sieci, zły klucz), odpowiedź czyta głos systemowy.
+ * Na czas czytania muzyka jest ściszana (fokus audio „transient may duck” – system ścisza inne odtwarzacze).
  */
 object Speech {
     const val SYSTEM = "system"
@@ -40,6 +44,52 @@ object Speech {
     private var player: MediaPlayer? = null
     private var job: Job? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+
+    private val attrs = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_ASSISTANT)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+        .build()
+    private var audio: AudioManager? = null
+    private var focus: AudioFocusRequest? = null
+
+    /** Ścisza muzykę na czas mówienia. */
+    private fun duck(ctx: Context) {
+        if (focus != null) return
+        val am = audio ?: ctx.applicationContext.getSystemService(AudioManager::class.java).also { audio = it }
+        val r = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+            .setAudioAttributes(attrs)
+            .setOnAudioFocusChangeListener { }
+            .build()
+        if (runCatching { am.requestAudioFocus(r) }.getOrNull() == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) focus = r
+    }
+
+    /** Muzyka wraca do zwykłej głośności. */
+    private fun unduck() {
+        val r = focus ?: return
+        focus = null
+        runCatching { audio?.abandonAudioFocusRequest(r) }
+    }
+
+    /** Po zakończeniu czytania (wołane z wątku silnika mowy). */
+    private val ttsListener = object : UtteranceProgressListener() {
+        override fun onStart(utteranceId: String?) {}
+        override fun onDone(utteranceId: String?) = finished(utteranceId)
+        @Deprecated("Deprecated in Java")
+        override fun onError(utteranceId: String?) = finished(utteranceId)
+        override fun onStop(utteranceId: String?, interrupted: Boolean) = finished(utteranceId)
+    }
+
+    /** id bieżącej wypowiedzi – koniec starej (przerwanej nową) nie przywraca głośności */
+    @Volatile
+    private var utterance = ""
+    private var counter = 0
+
+    private fun finished(id: String?) {
+        main.post { if (id == utterance && player == null) unduck() }
+    }
+
+    private fun nextId(): String { counter++; utterance = "ai$counter"; return utterance }
 
     /** Silnik systemowy (tworzony przy pierwszym użyciu); [then] po inicjalizacji. */
     private fun system(ctx: Context, then: (TextToSpeech) -> Unit) {
@@ -49,7 +99,11 @@ object Speech {
         if (t != null) return
         tts = TextToSpeech(ctx.applicationContext) { status ->
             ready = status == TextToSpeech.SUCCESS
-            if (ready) applyVoice()
+            if (ready) {
+                applyVoice()
+                tts?.setAudioAttributes(attrs)
+                tts?.setOnUtteranceProgressListener(ttsListener)
+            }
             val todo = pending.toList()
             pending.clear()
             if (ready) todo.forEach { it() }
@@ -80,21 +134,23 @@ object Speech {
     fun speak(ctx: Context, text: String) {
         val clean = text.replace(Regex("[*_#`>|]"), "").replace(Regex("\\s+"), " ").trim()
         if (clean.isEmpty()) return
-        stop()
+        stop(keepDuck = true)
         if (Prefs.ttsEngine == OPENAI && Prefs.openaiKey.isNotBlank()) speakOpenAi(ctx, clean, Prefs.openaiVoice)
         else speakSystem(ctx, clean)
     }
 
     private fun speakSystem(ctx: Context, text: String) = system(ctx) {
         applyVoice() // po odsłuchu w Ustawieniach wraca zapisany głos
-        it.speak(text, TextToSpeech.QUEUE_FLUSH, null, "ai")
+        duck(ctx)
+        if (it.speak(text, TextToSpeech.QUEUE_FLUSH, null, nextId()) != TextToSpeech.SUCCESS) unduck()
     }
 
     /** Odsłuch głosu systemowego w Ustawieniach (bez zapisywania wyboru). */
     fun previewSystem(ctx: Context, voice: Voice) = system(ctx) { t ->
         stop()
         t.voice = voice
-        t.speak(PL_SAMPLE, TextToSpeech.QUEUE_FLUSH, null, "preview")
+        duck(ctx)
+        if (t.speak(PL_SAMPLE, TextToSpeech.QUEUE_FLUSH, null, nextId()) != TextToSpeech.SUCCESS) unduck()
     }
 
     fun previewOpenAi(ctx: Context, voice: String) {
@@ -116,13 +172,16 @@ object Speech {
                 speakSystem(ctx, text)
                 return@launch
             }
-            player = MediaPlayer().apply {
-                setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-                setDataSource(file.path)
-                setOnCompletionListener { it.release(); if (player === it) player = null }
-                prepare()
-                start()
-            }
+            duck(ctx)
+            player = runCatching {
+                MediaPlayer().apply {
+                    setAudioAttributes(attrs)
+                    setDataSource(file.path)
+                    setOnCompletionListener { it.release(); if (player === it) { player = null; unduck() } }
+                    prepare()
+                    start()
+                }
+            }.onFailure { unduck() }.getOrNull()
         }
     }
 
@@ -150,11 +209,16 @@ object Speech {
         return f
     }
 
-    fun stop() {
+    fun stop() = stop(keepDuck = false)
+
+    /** [keepDuck] – zaraz zacznie się nowa wypowiedź, muzyka zostaje ściszona */
+    private fun stop(keepDuck: Boolean) {
         job?.cancel()
         tts?.stop()
         player?.let { runCatching { it.stop() }; it.release() }
         player = null
+        utterance = ""
+        if (!keepDuck) unduck()
     }
 
     fun shutdown() {

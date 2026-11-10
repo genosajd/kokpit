@@ -27,6 +27,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.DataUsage
+import androidx.compose.material.icons.outlined.Thermostat
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.foundation.border
@@ -74,6 +75,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -209,6 +213,7 @@ fun SettingsDialog(
     var aiProvider by remember { mutableStateOf(Prefs.aiProvider) }
     var aiSpeak by remember { mutableStateOf(Prefs.aiSpeak) }
     var hotword by remember { mutableStateOf(Prefs.hotword) }
+    var sensorPref by remember { mutableStateOf(Prefs.tuyaSensor) }
     var hotwordSens by remember { mutableStateOf(Prefs.hotwordSens) }
     var tokenLimit by remember { mutableStateOf(Prefs.aiTokenLimit) }
     val ttsEngine = Prefs.ttsEngine
@@ -232,7 +237,7 @@ fun SettingsDialog(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("Kokpit F11 0.3.11", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
+                Text("Kokpit F11 0.3.12", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
             }
             Spacer(Modifier.width(d(26)))
             LazyVerticalGrid(
@@ -349,6 +354,25 @@ fun SettingsDialog(
                     }
                 }
                 item {
+                    val sens by Tuya.sensor.collectAsState()
+                    val scope = rememberCoroutineScope()
+                    SettingTile(Icons.Outlined.Thermostat, "Czujnik temperatury w domu",
+                        when {
+                            sensorPref == "-" -> "Bez czujnika – temperatura z klimatyzatora. Dotknij, aby zmienić"
+                            sens != null -> "${sens!!.name}: ${sens!!.temp ?: "?"} °C. Dotknij, aby zmienić"
+                            else -> "Sam wybiera („T & H Sensor”). Dotknij, aby zmienić"
+                        }, on = sensorPref != "-") {
+                        scope.launch {
+                            val ids = listOf("") + Tuya.sensorList().map { it.first } + "-"
+                            val cur = if (sensorPref.isBlank()) "" else sensorPref
+                            sensorPref = ids[(ids.indexOf(cur).coerceAtLeast(0) + 1) % ids.size]
+                            Prefs.tuyaSensor = sensorPref
+                            Tuya.sensor.value = null
+                            Tuya.refresh()
+                        }
+                    }
+                }
+                item {
                     SettingTile(Icons.Outlined.AcUnit, "Klimatyzator", Prefs.tuyaDeviceName.ifBlank { if (Tuya.configured) "Wykryty przy pierwszym odczycie" else "Najpierw klucze Tuya" }) {
                         Tuya.reset()
                     }
@@ -390,7 +414,7 @@ fun SettingsDialog(
                         when {
                             !hotword -> "Wyłączone – nie zużywa mikrofonu ani procesora"
                             !overlay -> "Włączone, ale brak zgody „Wyświetlanie nad innymi” – dotknij"
-                            else -> "Słucha (w radiu, bez internetu), gdy radio nie gra; trochę obciąża procesor"
+                            else -> "Słucha w radiu, bez internetu (także przy muzyce); trochę obciąża procesor"
                         }, on = hotword) {
                         if (hotword && !overlay) {
                             runCatching { act.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:" + act.packageName))) }
@@ -414,7 +438,7 @@ fun SettingsDialog(
                 if (hotword) item {
                     val names = listOf("niska – tylko wyraźne „OK BMW”", "średnia", "wysoka – reaguje łatwiej, częściej sam się włącza")
                     SettingTile(Icons.Outlined.Tune, "Czułość „OK BMW”: " + names[hotwordSens].substringBefore(" –"),
-                        names[hotwordSens].substringAfter("– ", "Dotknij, aby zmienić; gdy radio gra, nie słucha")) {
+                        names[hotwordSens].substringAfter("– ", "Dotknij, aby zmienić")) {
                         hotwordSens = (hotwordSens + 1) % 3; Prefs.hotwordSens = hotwordSens
                     }
                 }

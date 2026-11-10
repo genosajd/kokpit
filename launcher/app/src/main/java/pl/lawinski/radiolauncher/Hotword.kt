@@ -7,7 +7,10 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.media.AudioManager
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -17,8 +20,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.vosk.Model
 import org.vosk.Recognizer
-import org.vosk.android.RecognitionListener
-import org.vosk.android.SpeechService
 import java.io.File
 import java.util.zip.ZipInputStream
 
@@ -30,7 +31,8 @@ import java.util.zip.ZipInputStream
  * Domyślnie WYŁĄCZONE (Ustawienia → Asystent AI → „OK BMW”). Wyłączone = brak usługi, modelu
  * w pamięci i nasłuchu mikrofonu. Włączone: usługa pierwszoplanowa typu „mikrofon” z powiadomieniem;
  * po haśle oddaje mikrofon i otwiera okienko asystenta (VoiceActivity), po jego zamknięciu słucha dalej.
- * Gdy radio gra (muzyka, film, odpowiedź asystenta), mikrofon jest wyłączony. Czułość: Prefs.hotwordSens.
+ * Słucha też, gdy gra muzyka (na nagraniach z muzyką w tle nie było fałszywych wywołań); wyłącza się tylko,
+ * gdy mówi asystent. Czułość: Prefs.hotwordSens.
  * Otwieranie okienka z tła wymaga zgody „Wyświetlanie nad innymi aplikacjami”.
  */
 object Hotword {
@@ -48,8 +50,12 @@ object Hotword {
      */
     private val DECOYS = listOf("to", "jest", "nie", "tak", "co", "no", "dobrze", "a", "i", "w", "na", "do", "się", "że", "po", "be", "em", "wu")
 
-    /** Minimalna pewność słów hasła dla czułości 0 = niska, 1 = średnia, 2 = wysoka. */
-    private val MIN_CONF = doubleArrayOf(0.99, 0.9, 0.7)
+    /**
+     * Minimalna pewność „bmw” i słowa przed nim dla czułości 0 = niska, 1 = średnia, 2 = wysoka.
+     * „bmw” jest charakterystyczne, więc musi być pewne; „ok/hej” przy muzyce bywa niewyraźne.
+     */
+    private val MIN_BMW = doubleArrayOf(0.95, 0.8, 0.6)
+    private val MIN_LEAD = doubleArrayOf(0.8, 0.4, 0.3)
 
     fun hasModel(ctx: Context) = runCatching { ctx.assets.open(MODEL_ASSET).close() }.isSuccess
 
@@ -89,15 +95,26 @@ object Hotword {
         return dir
     }
 
-    /** Hasło w wyniku końcowym (z pewnością słów): „ok/okej/hej” zaraz przed „bmw”, oba dość pewne. */
-    internal fun isWake(json: String): Boolean {
-        val words = runCatching { JSONObject(json).optJSONArray("result") }.getOrNull() ?: return false
-        val min = MIN_CONF[Prefs.hotwordSens.coerceIn(0, 2)]
-        for (i in 1 until words.length()) {
-            val a = words.getJSONObject(i - 1)
-            val b = words.getJSONObject(i)
-            if (a.optString("word") in LEAD && b.optString("word") == "bmw" &&
-                a.optDouble("conf", 0.0) >= min && b.optDouble("conf", 0.0) >= min) return true
+    /** Słowa z wyniku końcowego Vosk (z pewnością i czasem). */
+    internal class Word(val word: String, val conf: Double, val start: Double, val end: Double)
+
+    internal fun words(json: String): List<Word> {
+        val a = runCatching { JSONObject(json).optJSONArray("result") }.getOrNull() ?: return emptyList()
+        return (0 until a.length()).map { a.getJSONObject(it) }
+            .map { Word(it.optString("word"), it.optDouble("conf", 0.0), it.optDouble("start"), it.optDouble("end")) }
+    }
+
+    /**
+     * Hasło: „ok/okej/hej” zaraz przed „bmw”, oba dość pewne. [prev] = ostatnie słowo poprzedniego wyniku –
+     * przy wolnej mowie albo muzyce Vosk potrafi uciąć wypowiedź między „okej” a „bmw”.
+     */
+    internal fun isWake(prev: Word?, words: List<Word>): Boolean {
+        val s = Prefs.hotwordSens.coerceIn(0, 2)
+        val seq = listOfNotNull(prev) + words
+        for (i in 1 until seq.size) {
+            val a = seq[i - 1]
+            val b = seq[i]
+            if (a.word in LEAD && b.word == "bmw" && b.conf >= MIN_BMW[s] && a.conf >= MIN_LEAD[s] && b.start - a.end < 1.0) return true
         }
         return false
     }
@@ -107,16 +124,19 @@ object Hotword {
 
 class HotwordService : Service() {
     private var model: Model? = null
-    private var speech: SpeechService? = null
     private var paused = false
-    /** radio gra albo asystent mówi – wtedy nie słuchamy (głośniki mylą rozpoznawanie) */
+    /** asystent mówi – wtedy nie słuchamy (sam mówi „BMW”) */
     private var muted = false
     private var quietSince = 0L
-    private val audio by lazy { getSystemService(AudioManager::class.java) }
     private var lastWake = 0L
     private val main = Handler(Looper.getMainLooper())
     @Volatile
     private var stopped = false
+    /** wątek nagrywania; null = nie słucha */
+    @Volatile
+    private var listener: Thread? = null
+    /** ostatni wątek – nowy czeka, aż stary odda mikrofon */
+    private var worker: Thread? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -142,7 +162,7 @@ class HotwordService : Service() {
                 main.post {
                     if (stopped) { m.close(); return@post }
                     model = m
-                    watchAudio()
+                    watchSpeech()
                 }
             } catch (e: Throwable) {
                 Log.e(TAG, "model", e)
@@ -153,67 +173,90 @@ class HotwordService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) = START_STICKY
 
-    /** Co sekundę: gdy radio gra (muzyka, film, odpowiedź asystenta) – mikrofon wyłączony. */
-    private fun watchAudio() {
+    /** Co 0,5 s: gdy asystent czyta odpowiedź – mikrofon wyłączony; po niej chwila przerwy. */
+    private fun watchSpeech() {
         if (stopped) return
-        val playing = runCatching { audio.isMusicActive }.getOrDefault(false) || Speech.isSpeaking()
         val now = System.currentTimeMillis()
-        if (playing) {
+        if (Speech.isSpeaking()) {
             quietSince = 0L
-            if (!muted) { muted = true; stopListening(); Log.i(TAG, "radio gra – nie słucham") }
+            if (!muted) { muted = true; stopListening(); Log.i(TAG, "asystent mówi – nie słucham") }
         } else {
             if (quietSince == 0L) quietSince = now
-            // po ucichnięciu chwila przerwy (koniec zdania, przerwa między utworami)
-            if (muted && now - quietSince >= 1500) { muted = false; Log.i(TAG, "cisza – słucham") }
+            if (muted && now - quietSince >= 700) { muted = false; Log.i(TAG, "słucham") }
         }
         if (!muted && !paused) startListening()
-        main.postDelayed({ watchAudio() }, 1000)
+        main.postDelayed({ watchSpeech() }, 500)
     }
 
     private fun startListening() {
         val m = model ?: return
-        if (speech != null || muted || paused || stopped) return
+        if (listener != null || muted || paused || stopped) return
+        val old = worker
+        listener = Thread({ runCatching { old?.join(1500) }; listen(m) }, "KokpitHotword").also { worker = it; it.start() }
+    }
+
+    /** Własne nagrywanie (zamiast SpeechService), żeby włączyć systemowe usuwanie echa głośników, jeśli radio je ma. */
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun listen(m: Model) {
+        val me = Thread.currentThread()
+        var rec: AudioRecord? = null
+        var aec: AcousticEchoCanceler? = null
+        var recognizer: Recognizer? = null
         try {
-            val rec = Recognizer(m, 16000f, Hotword.grammar())
-            rec.setWords(true)
-            speech = SpeechService(rec, 16000f).also {
-                it.startListening(object : RecognitionListener {
-                    // wyniki częściowe są zbyt zawodne – tylko końcowe, z pewnością słów
-                    override fun onPartialResult(hypothesis: String) {}
-                    override fun onResult(hypothesis: String) {
-                        if (Hotword.isWake(hypothesis)) wake()
-                    }
-                    override fun onFinalResult(hypothesis: String) {}
-                    override fun onError(exception: Exception) {
-                        Log.w(TAG, "mic", exception)
-                        // mikrofon zajęty przez inną aplikację – spróbuj za chwilę
-                        stopListening()
-                        main.postDelayed({ startListening() }, 5000)
-                    }
-                    override fun onTimeout() {}
-                })
+            val rate = 16000
+            val min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+            rec = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, rate, AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT, maxOf(min, rate))
+            if (rec.state != AudioRecord.STATE_INITIALIZED) throw IllegalStateException("AudioRecord")
+            if (AcousticEchoCanceler.isAvailable()) {
+                aec = runCatching { AcousticEchoCanceler.create(rec.audioSessionId)?.also { it.enabled = true } }.getOrNull()
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "start", e)
-            speech = null
-            main.postDelayed({ startListening() }, 5000)
+            Log.i(TAG, "mikrofon włączony, usuwanie echa: " + (if (aec?.enabled == true) "tak" else "brak"))
+            recognizer = Recognizer(m, rate.toFloat(), Hotword.grammar()).apply { setWords(true) }
+            val buf = ShortArray(rate / 5) // 0,2 s
+            rec.startRecording()
+            var prev: Hotword.Word? = null
+            var prevAt = 0L
+            while (listener === me && !stopped) {
+                val n = rec.read(buf, 0, buf.size)
+                if (n < 0) throw IllegalStateException("read $n")
+                if (n == 0 || !recognizer.acceptWaveForm(buf, n)) continue
+                val words = Hotword.words(recognizer.result)
+                if (words.isEmpty()) continue
+                // ostatnie słowo poprzedniego wyniku liczy się tylko chwilę
+                val p = prev.takeIf { System.currentTimeMillis() - prevAt < 2500 }
+                if (Hotword.isWake(p, words)) {
+                    prev = null
+                    main.post { wake() }
+                } else {
+                    prev = words.last(); prevAt = System.currentTimeMillis()
+                }
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "mic", e)
+            // mikrofon zajęty przez inną aplikację – spróbuj za chwilę (watchSpeech uruchomi ponownie)
+            main.postDelayed({ if (listener === me) listener = null }, 5000)
+        } finally {
+            runCatching { rec?.stop() }
+            runCatching { rec?.release() }
+            runCatching { aec?.release() }
+            runCatching { recognizer?.close() }
         }
     }
 
     private fun stopListening() {
-        speech?.let { runCatching { it.stop() }; runCatching { it.shutdown() } }
-        speech = null
+        listener = null // wątek kończy się po bieżącym fragmencie
     }
 
     private fun wake() {
         val now = System.currentTimeMillis()
         if (now - lastWake < 3000) return
-        if (muted || Speech.isSpeaking()) return
+        if (muted || paused || Speech.isSpeaking()) return
         lastWake = now
         Log.i(TAG, "OK BMW")
         pauseListening() // mikrofon dla okienka asystenta
         // okienko już otwarte: zaczyna nowe pytanie (onNewIntent → begin)
-        main.post { Speech.stop(); VoiceActivity.start(this) }
+        Speech.stop(); VoiceActivity.start(this)
         // gdyby okienko się nie otworzyło (brak zgody na wyświetlanie nad innymi) – słuchaj dalej
         main.postDelayed({ if (!VoiceActivity.open) resumeListening() }, 4000)
     }
@@ -232,9 +275,12 @@ class HotwordService : Service() {
         stopped = true
         instance = null
         main.removeCallbacksAndMessages(null)
+        val t = worker
         stopListening()
-        model?.close()
+        // model zwalniamy dopiero, gdy wątek nagrywania skończy
+        val m = model
         model = null
+        Thread { runCatching { t?.join(2000) }; m?.close() }.start()
         super.onDestroy()
     }
 
