@@ -36,6 +36,9 @@ object Prefs {
         sp = ctx.getSharedPreferences("launcher", Context.MODE_PRIVATE)
     }
 
+    /** całość ustawień – tylko dla eksportu, importu i resetu (Backup.kt) */
+    val store: SharedPreferences get() = sp
+
     /** Skróty jako "pakiet/klasa" (albo [APPS_DRAWER]), w kolejności wyświetlania. */
     var shortcuts: List<String>
         get() = sp.getString("shortcuts", null)?.split('\n')?.filter { it.isNotBlank() } ?: emptyList()

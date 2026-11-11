@@ -25,6 +25,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Hearing
 import androidx.compose.material.icons.outlined.Bolt
@@ -223,6 +225,8 @@ fun SettingsDialog(
     var phraseDlg by remember { mutableStateOf(false) }
     var editRule by remember { mutableStateOf<Pair<Rule, Boolean>?>(null) }
     editRule?.let { (r, isNew) -> RuleDialog(r, isNew, act) { editRule = null } }
+    var backup by remember { mutableStateOf<BackupAction?>(null) }
+    backup?.let { BackupConfirm(it, act) { backup = null } }
     if (phraseDlg) HotwordPhraseDialog { phraseDlg = false; phrase = Prefs.hotwordPhrase }
     var tokenLimit by remember { mutableStateOf(Prefs.aiTokenLimit) }
     val ttsEngine = Prefs.ttsEngine
@@ -297,6 +301,9 @@ fun SettingsDialog(
                 item { SettingTile(Icons.Outlined.Settings, "Ustawienia Androida", "Wi-Fi, Bluetooth, aplikacje") { open(Settings.ACTION_SETTINGS) } }
                 item { SettingTile(Icons.Outlined.Home, "Ekran główny", "Wybierz „Kokpit F11” jako domyślny launcher") { open(Settings.ACTION_HOME_SETTINGS) } }
                 if (!locOn) item { SettingTile(Icons.Outlined.MyLocation, "Lokalizacja", "Potrzebna do prędkości i pogody", on = false) { act.requestLocation() } }
+                item { SettingTile(Icons.Outlined.Save, "Eksport ustawień", "Zapisz wszystkie ustawienia Kokpitu do pliku JSON") { backup = BackupAction.EXPORT } }
+                item { SettingTile(Icons.Outlined.FolderOpen, "Import ustawień", "Wczytaj ustawienia z pliku JSON – zastąpi obecne") { backup = BackupAction.IMPORT } }
+                item { SettingTile(Icons.Outlined.RestartAlt, "Przywróć stan początkowy", "Usuwa wszystkie ustawienia, klucze i rozmowę z asystentem") { backup = BackupAction.RESET } }
                     }
                     2 -> {
                 item {
@@ -799,6 +806,12 @@ fun InstructionsDialog(onClose: () -> Unit) {
                     placeholder = { Text("Np.: Zwracaj się do mnie po imieniu: … Mów krótko i z humorem. „Praca Gabi” to praca …") },
                 )
                 Text("Asystent stosuje to w każdej rozmowie (Claude i OpenAI). Zapis zaczyna nową rozmowę.", color = Dim, fontSize = s(18))
+                val act = MainActivity.live
+                if (act != null) Row(horizontalArrangement = Arrangement.spacedBy(d(10))) {
+                    TextButton(onClick = { act.saveTextFile("kokpit-instrukcje.txt", text.trim()) }, enabled = text.isNotBlank()) { Text("Eksport do pliku") }
+                    // wczytany tekst trafia do pola – obowiązuje dopiero po „Zapisz”
+                    TextButton(onClick = { act.openTextFile { text = it.trim() } }) { Text("Import z pliku") }
+                }
             }
         },
         confirmButton = {

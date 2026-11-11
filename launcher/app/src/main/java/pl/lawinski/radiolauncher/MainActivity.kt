@@ -69,6 +69,72 @@ class MainActivity : ComponentActivity() {
     private val configureLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
         if (r.resultCode == RESULT_OK) saveWidget(pendingWidgetId) else dropPending()
     }
+    /** eksport / import ustawień (Backup.kt) przez systemowy wybór pliku */
+    private var exportSecrets = false
+    private val exportLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) Backup.write(this, uri, exportSecrets)
+    }
+    private val importLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) Backup.read(this, uri)
+    }
+
+    /** zwykły plik tekstowy (instrukcje dla asystenta): zapis podanego tekstu i odczyt do [onTextFile] */
+    private var textToSave = ""
+    private var onTextFile: ((String) -> Unit)? = null
+    private val saveTextLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        if (uri != null) try {
+            contentResolver.openOutputStream(uri, "wt")!!.use { it.write(textToSave.toByteArray()) }
+            android.widget.Toast.makeText(this, "Zapisano do pliku", android.widget.Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(this, "Nie udało się zapisać pliku: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+    private val openTextLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) try {
+            val b = contentResolver.openInputStream(uri)!!.use { it.readNBytes(100_001) }
+            if (b.size > 100_000) throw IllegalArgumentException("plik jest za duży")
+            if (b.any { it == 0.toByte() }) throw IllegalArgumentException("to nie jest plik tekstowy")
+            onTextFile?.invoke(String(b))
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(this, "Nie wczytano – ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    fun saveTextFile(name: String, text: String) {
+        textToSave = text
+        try {
+            saveTextLauncher.launch(name)
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(this, "Radio nie ma aplikacji do wyboru miejsca zapisu pliku", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    fun openTextFile(onText: (String) -> Unit) {
+        onTextFile = onText
+        try {
+            openTextLauncher.launch(arrayOf("text/*", "application/octet-stream"))
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(this, "Radio nie ma aplikacji do wyboru pliku", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    fun exportSettings(withSecrets: Boolean) {
+        exportSecrets = withSecrets
+        try {
+            exportLauncher.launch(Backup.FILE_NAME)
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(this, "Radio nie ma aplikacji do wyboru miejsca zapisu pliku", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    fun importSettings() {
+        try {
+            importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(this, "Radio nie ma aplikacji do wyboru pliku", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
     /** Mowa → tekst (Google) dla asystenta. */
     private var onSpeech: ((String) -> Unit)? = null
     private val speechLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->

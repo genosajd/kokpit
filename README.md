@@ -24,6 +24,8 @@ Kotlin + Jetpack Compose, ekran 2560x720.
 - **Radio Witstek:** głośność wzmacniacza radia (0–40) w górnym pasku i przez asystenta, napięcie akumulatora auta, rozmowa telefoniczna → ekran iDrive, przechył kontrolera iDrive w górę i w dół.
 - Na czas nawigacji Kokpit może wyłączyć wyskakujące komunikaty Map (wymaga `adb shell pm grant pl.lawinski.radiolauncher android.permission.WRITE_SECURE_SETTINGS`; bez tego kafelek otwiera ustawienia powiadomień Map).
 - Edycja układu: przycisk „Widżety” otwiera okno wyboru bloków z podglądem. Okienko zgody na dzienniki można wyłączyć przełącznikiem „Dane auta z dzienników radia” (wtedy bez paliwa na żywo).
+- **Eksport, import i reset ustawień** (Ustawienia → Radio i system): wszystkie ustawienia do pliku JSON (z kluczami albo bez), wczytanie z pliku oraz powrót do stanu początkowego z usunięciem kluczy, tokenów i rozmowy z asystentem. Instrukcje dla asystenta mają własny eksport i import pliku tekstowego.
+- **Kontroler iDrive:** przechył przenosi zaznaczenie na sąsiedni blok (także na następną stronę ekranu), obrót chodzi po przyciskach.
 - Asystent ma własne instrukcje (np. jak się do Ciebie zwracać) w Ustawieniach → Asystent AI.
 - Rozmowa z asystentem zostaje po restarcie radia. Zaczyna się od nowa po przekroczeniu limitu tokenów (Ustawienia → Asystent AI, domyślnie 500 tys.) albo przyciskiem odświeżenia w bloku.
 - Podgląd kamery Xiaomi na żywo (RTSP z aplikacji Xiaomi Cam z serwerem w tle); gdy dekoder sprzętowy nie da rady, przełącza się na programowy.

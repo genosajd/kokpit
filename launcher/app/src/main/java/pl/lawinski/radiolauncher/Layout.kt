@@ -1,5 +1,11 @@
 package pl.lawinski.radiolauncher
 
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
@@ -191,6 +197,24 @@ object LayoutStore {
 }
 
 /**
+ * Klocki, do których przechodzi zaznaczenie z klocka [from] w stronę [dir] (0 lewo, 1 prawo, 2 góra, 3 dół),
+ * od najbliższego. Bez zaznaczenia – pierwszy klocek widocznej strony ([firstCol] = pierwsza widoczna kolumna).
+ */
+fun blockNeighbours(slots: List<Slot>, from: Slot?, dir: Int, firstCol: Int): List<Slot> {
+    if (from == null) return slots.sortedWith(compareBy({ if (it.c >= firstCol) it.c - firstCol else 1000 + firstCol - it.c }, { it.r }))
+    fun gap(a0: Int, a1: Int, b0: Int, b1: Int) = maxOf(0, b0 - a1 + 1, a0 - b1 + 1) // 0 = odcinki zachodzą na siebie, 1 = stykają się
+    val rows = { s: Slot -> gap(from.r, from.r + from.h, s.r, s.r + s.h) }
+    val cols = { s: Slot -> gap(from.c, from.c + from.w, s.c, s.c + s.w) }
+    return when (dir) {
+        0 -> slots.filter { it.c + it.w <= from.c }.sortedWith(compareBy({ from.c - (it.c + it.w) + rows(it) * 2 }, { rows(it) }, { it.r }))
+        1 -> slots.filter { it.c >= from.c + from.w }.sortedWith(compareBy({ it.c - (from.c + from.w) + rows(it) * 2 }, { rows(it) }, { it.r }))
+        // góra / dół: tylko klocki nad / pod tym samym miejscem (inaczej zaznaczenie uciekałoby w bok)
+        2 -> slots.filter { it.r + it.h <= from.r && cols(it) == 0 }.sortedWith(compareBy({ from.r - (it.r + it.h) }, { it.c }))
+        else -> slots.filter { it.r >= from.r + from.h && cols(it) == 0 }.sortedWith(compareBy({ it.r - (from.r + from.h) }, { it.c }))
+    }
+}
+
+/**
  * Siatka klocków. W trybie edycji klocek przesuwa się przeciągnięciem, a rozmiar zmienia
  * uchwytem w prawym dolnym rogu; po puszczeniu wszystko przyciąga się do komórek.
  */
@@ -235,7 +259,32 @@ fun BlockGrid(
             }
         }
         val cellH = (maxHeight - gap * (GRID_ROWS - 1)) / GRID_ROWS
-        Box(Modifier.fillMaxSize().then(if (scrolling) Modifier.horizontalScroll(scroll) else Modifier)) {
+        // Przechył pokrętła iDrive (strzałki): zaznaczenie skacze do sąsiedniego klocka; obrót (Tab) chodzi po przyciskach.
+        val requesters = remember { HashMap<String, androidx.compose.ui.focus.FocusRequester>() }
+        var focusedKey by remember { mutableStateOf<String?>(null) }
+        val jump = Modifier.onPreviewKeyEvent { e ->
+            val dir = when (e.key) {
+                androidx.compose.ui.input.key.Key.DirectionLeft -> 0
+                androidx.compose.ui.input.key.Key.DirectionRight -> 1
+                androidx.compose.ui.input.key.Key.DirectionUp -> 2
+                androidx.compose.ui.input.key.Key.DirectionDown -> 3
+                else -> -1
+            }
+            if (dir < 0 || edit) return@onPreviewKeyEvent false
+            val from = slots.firstOrNull { it.key == focusedKey }
+            val order = blockNeighbours(slots, from, dir, firstCol = kotlin.math.round(scroll.value / colStep).toInt())
+            // góra / dół bez klocka w tę stronę: zwykłe przejście (np. na górny pasek)
+            if (order.isEmpty()) return@onPreviewKeyEvent from != null && dir < 2
+            if (e.type == androidx.compose.ui.input.key.KeyEventType.KeyDown) {
+                // klocek bez przycisków nie przyjmie zaznaczenia – próbujemy następny w tę samą stronę
+                for (t in order) {
+                    runCatching { requesters[t.key]?.requestFocus() }
+                    if (focusedKey == t.key) break
+                }
+            }
+            true
+        }
+        Box(Modifier.fillMaxSize().then(jump).then(if (scrolling) Modifier.horizontalScroll(scroll) else Modifier)) {
         Box(Modifier.width(innerW).fillMaxHeight()) {
         val stepX = with(density) { (cellW + gap).toPx() }
         val viewW = with(density) { pageW.toPx() }
@@ -279,6 +328,9 @@ fun BlockGrid(
                         .offset(x = (cellW + gap) * slot.c, y = (cellH + gap) * slot.r)
                         .offset { IntOffset(drag.x.roundToInt(), drag.y.roundToInt()) }
                         .size((w + growW).coerceAtLeast(cellW), (h + growH).coerceAtLeast(cellH))
+                        .focusRequester(requesters.getOrPut(slot.key) { androidx.compose.ui.focus.FocusRequester() })
+                        .onFocusChanged { f -> if (f.hasFocus) focusedKey = slot.key else if (focusedKey == slot.key) focusedKey = null }
+                        .focusGroup()
                 ) {
                     content(slot)
                     if (edit) {
