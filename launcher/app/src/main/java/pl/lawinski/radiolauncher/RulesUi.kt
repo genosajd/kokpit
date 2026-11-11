@@ -63,13 +63,28 @@ fun RuleDialog(rule: Rule, isNew: Boolean, act: MainActivity, onClose: () -> Uni
                 RuleSource.entries.forEach { src ->
                     Chip(src.title, on = r.source == src) {
                         // przy zmianie rodzaju źródła (liczba ↔ Slack) stara wartość nie pasuje
-                        r = r.copy(source = src, value = if (src.slack != r.source.slack) "" else r.value, slackTs = "")
+                        r = r.copy(source = src, value = if (src.slack != r.source.slack || src.camera != r.source.camera) "" else r.value, ai = r.ai || src.camera, slackTs = "")
                     }
                 }
             }
             // 2. próg albo osoba / kanał
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(d(10))) {
-                if (!r.source.slack) {
+                if (r.source.camera) {
+                    OutlinedTextField(
+                        r.value, { r = r.copy(value = it) }, singleLine = true, modifier = Modifier.width(d(520)),
+                        placeholder = { Text(r.source.target) },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    )
+                    Text("sprawdzaj", color = Dim, fontSize = s(20))
+                    Chip("co ustawioną przerwę", on = r.moment == 0) { r = r.copy(moment = 0) }
+                    Chip("po ruszeniu", on = r.moment == 1) { r = r.copy(moment = 1) }
+                    Chip("o godzinie", on = r.moment == 2) { r = r.copy(moment = 2) }
+                    if (r.moment == 2) OutlinedTextField(
+                        r.time, { r = r.copy(time = it) }, singleLine = true, modifier = Modifier.width(d(170)),
+                        placeholder = { Text("8:00") }, isError = r.minuteOfDay() == null,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    )
+                } else if (!r.source.slack) {
                     Chip("mniej niż", on = r.less) { r = r.copy(less = true) }
                     Chip("więcej niż", on = !r.less) { r = r.copy(less = false) }
                     OutlinedTextField(
@@ -97,16 +112,21 @@ fun RuleDialog(rule: Rule, isNew: Boolean, act: MainActivity, onClose: () -> Uni
             OutlinedTextField(
                 r.text, { r = r.copy(text = it) }, minLines = 2, maxLines = 4, modifier = Modifier.fillMaxWidth(),
                 placeholder = {
-                    Text(if (r.ai) "Co ma zrobić asystent, np.: Powiedz, że trzeba zatankować, i zaproponuj najbliższą stację"
+                    Text(if (r.source.camera) "Co sprawdzić na zdjęciu i kiedy się odezwać, np.: Jeśli furtka jest otwarta, powiedz mi o tym"
+                    else if (r.ai) "Co ma zrobić asystent, np.: Powiedz, że trzeba zatankować, i zaproponuj najbliższą stację"
                     else "Tekst do przeczytania, np.: Zostało {wartość} litrów paliwa, jedź na stację")
                 },
             )
             // 4. sposób i przerwa
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(d(10))) {
-                Chip("Asystent wykonuje polecenie", on = r.ai) { r = r.copy(ai = true) }
-                Chip("Czytaj dokładnie ten tekst", on = !r.ai) { r = r.copy(ai = false) }
-                Text("nie częściej niż co", color = Dim, fontSize = s(20), modifier = Modifier.padding(start = d(16)))
+                if (r.source.camera) {
+                    Text("Każde sprawdzenie to płatne zapytanie do asystenta ze zdjęciem.", color = Dim, fontSize = s(20))
+                } else {
+                    Chip("Asystent wykonuje polecenie", on = r.ai) { r = r.copy(ai = true) }
+                    Chip("Czytaj dokładnie ten tekst", on = !r.ai) { r = r.copy(ai = false) }
+                }
+                Text(if (r.source.camera && r.moment == 0) "co" else "nie częściej niż co", color = Dim, fontSize = s(20), modifier = Modifier.padding(start = d(16)))
                 val ci = Rule.COOLDOWNS.indexOfFirst { it.first == r.cooldownMin }.coerceAtLeast(0)
                 Chip(Rule.COOLDOWNS[ci].second) { r = r.copy(cooldownMin = Rule.COOLDOWNS[(ci + 1) % Rule.COOLDOWNS.size].first) }
             }

@@ -162,7 +162,7 @@ private object AssistantTools {
         else if (name == "camera_snapshot") snapshot(act, input.optString("camera").trim()) else ToolOut(runText(act, name, input))
 
     /** Klatka z kamery: go2rtc w Xiaomi Cam daje krótki plik api/frame.mp4, z którego bierzemy pierwszy obraz. */
-    private fun snapshot(act: MainActivity, wanted: String): ToolOut {
+    fun snapshot(act: MainActivity, wanted: String): ToolOut {
         val names = kotlinx.coroutines.runBlocking { XiaomiCamServer.camerasWaking(act) }
             ?: return ToolOut("Xiaomi Cam nie odpowiada – kamera niedostępna (aplikacja i jej serwer w tle muszą działać)")
         val cams = names.filter { !it.startsWith("__") }
@@ -493,7 +493,7 @@ private fun systemPrompt(): String {
 /** Rozmowa z jednym dostawcą; trzyma całą historię, żeby asystent pamiętał kontekst. */
 private interface ChatEngine {
     /** Wysyła wypowiedź i zwraca odpowiedź (po wykonaniu narzędzi). Wywoływać poza wątkiem UI. */
-    fun send(text: String): String
+    fun send(text: String, jpeg: String? = null): String
 
     /** Rozmiar rozmowy w tokenach po ostatnim zapytaniu (cała historia + odpowiedź). */
     val tokens: Long
@@ -534,8 +534,16 @@ private class ClaudeEngine(private val act: MainActivity, apiKey: String, privat
             .build()
     }
 
-    override fun send(text: String): String {
-        history += MessageParam.ofUser(text)
+    override fun send(text: String, jpeg: String?): String {
+        history += if (jpeg == null) MessageParam.ofUser(text) else MessageParam.ofUserOfContentBlockParams(listOf(
+            ContentBlockParam.ofImage(
+                com.anthropic.models.messages.ImageBlockParam.builder().source(
+                    com.anthropic.models.messages.Base64ImageSource.builder()
+                        .mediaType(com.anthropic.models.messages.Base64ImageSource.MediaType.IMAGE_JPEG).data(jpeg).build()
+                ).build()
+            ),
+            ContentBlockParam.ofText(com.anthropic.models.messages.TextBlockParam.builder().text(text).build()),
+        ))
         repeat(8) {
             val params = MessageCreateParams.builder()
                 .model(model)
@@ -619,8 +627,10 @@ private class OpenAiEngine(private val act: MainActivity, private val apiKey: St
         }
     }
 
-    override fun send(text: String): String {
-        history.put(JSONObject().put("role", "user").put("content", text))
+    override fun send(text: String, jpeg: String?): String {
+        history.put(JSONObject().put("role", "user").put("content", if (jpeg == null) text else JSONArray()
+            .put(JSONObject().put("type", "text").put("text", text))
+            .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", "data:image/jpeg;base64,$jpeg")))))
         repeat(8) {
             val body = JSONObject().put("model", model).put("messages", history).put("tools", tools)
             val res = post(body)
@@ -800,6 +810,31 @@ object Assistant {
             if (Prefs.aiSpeak || speak) act.speak(reply)
             // bez bloku „Asystent” na ekranie (wywołanie przyciskiem głosowym) pokaż odpowiedź w dymku
             if (!VoiceActivity.open && act.layout.value.none { it.id == BlockId.ASSISTANT }) android.widget.Toast.makeText(act, reply, android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** Wynik [look]: ok = jest odpowiedź asystenta; inaczej [text] mówi, czego zabrakło. */
+    class Look(val ok: Boolean, val text: String)
+
+    /**
+     * Jednorazowe pytanie o aktualny obraz z kamery (reguły z kamerą): osobna, pusta historia – nie miesza się
+     * z rozmową właściciela. [prompt] dostaje opis zdjęcia (kamera i godzina). Wywoływać poza wątkiem UI.
+     */
+    fun look(act: MainActivity, camera: String, prompt: (String) -> String): Look {
+        if (!hasKey()) return Look(false, "brak klucza API")
+        if (!Access.allows("camera_snapshot")) return Look(false, "dostęp asystenta do kamer jest wyłączony")
+        val shot = try {
+            AssistantTools.snapshot(act, camera)
+        } catch (e: Exception) {
+            return Look(false, "kamera: ${e.message}")
+        }
+        val jpeg = shot.jpeg ?: return Look(false, shot.text)
+        return try {
+            val p = Prefs.aiProvider
+            val e: ChatEngine = if (p == OPENAI) OpenAiEngine(act, Prefs.openaiKey, Prefs.openaiModel) else ClaudeEngine(act, Prefs.anthropicKey, Prefs.anthropicModel)
+            Look(true, e.send(prompt(shot.text), jpeg))
+        } catch (e: Exception) {
+            Look(false, errorText(e))
         }
     }
 

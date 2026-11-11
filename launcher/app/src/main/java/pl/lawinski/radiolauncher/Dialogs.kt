@@ -246,7 +246,7 @@ fun SettingsDialog(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("Kokpit F11 0.3.14", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
+                Text("Kokpit F11 0.3.15", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
             }
             Spacer(Modifier.width(d(26)))
             LazyVerticalGrid(
@@ -374,14 +374,14 @@ fun SettingsDialog(
                     }
                     9 -> {
                 item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
-                    Text("Jeśli warunek jest spełniony, asystent mówi albo robi to, co wpiszesz. Liczby Kokpit sprawdza sam co 30 s, Slack co 2 min.",
+                    Text("Jeśli warunek jest spełniony, asystent mówi albo robi to, co wpiszesz. Liczby Kokpit sprawdza sam co 30 s, Slack co 2 min. Kamera: asystent dostaje zdjęcie w wybranym momencie i odzywa się tylko, gdy jest co zgłosić.",
                         color = Dim, fontSize = s(20), modifier = Modifier.padding(bottom = d(4)))
                 }
                 items(Rules.list.size) { i ->
                     val r = Rules.list[i]
                     SettingTile(Icons.Outlined.Bolt, r.summary(), if (r.complete()) r.text.replace('\n', ' ').take(90) else "Niepełna – dotknij, aby uzupełnić", on = r.on) { editRule = r to false }
                 }
-                item { SettingTile(Icons.Outlined.Add, "Dodaj regułę", "Np. paliwo mniej niż 10 l albo wiadomość na Slacku") { editRule = Rule(id = System.currentTimeMillis()) to true } }
+                item { SettingTile(Icons.Outlined.Add, "Dodaj regułę", "Np. paliwo mniej niż 10 l, wiadomość na Slacku albo otwarta furtka na kamerze") { editRule = Rule(id = System.currentTimeMillis()) to true } }
                     }
                     8 -> {
                 item {
