@@ -1,0 +1,381 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
+package pl.lawinski.radiolauncher
+
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import android.media.AudioManager
+import android.media.MediaMetadata
+import android.media.session.MediaController
+import android.media.session.MediaSession
+import android.media.session.MediaSessionManager
+import android.media.session.PlaybackState
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import android.provider.Settings
+import android.util.Log
+import android.view.KeyEvent
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.MusicNote
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import kotlinx.coroutines.delay
+
+/*
+ * Blok „Multimedia”: steruje odtwarzaczem, który gra albo grał ostatnio (YouTube, SoundCloud, dowolny inny) –
+ * przez sesje multimediów Androida, bez wiedzy o konkretnej aplikacji. Pokazuje okładkę, tytuł i wykonawcę,
+ * pozwala wstrzymać/wznowić, zmienić utwór i przewinąć. Lista sesji wymaga dostępu do powiadomień
+ * (tego samego, co podgląd trasy – NavListener). Gdy odtwarzacz dawno wstrzymany nie ma już sesji,
+ * przycisk „graj” wysyła mu przycisk multimediów (wznawia bez otwierania aplikacji).
+ */
+object MediaHub {
+    private const val TAG = "KokpitMedia"
+
+    class Now(
+        val pkg: String,
+        val app: String,
+        val title: String,
+        val artist: String,
+        val art: ImageBitmap?,
+        val playing: Boolean,
+        /** pozycja w ms w chwili [positionAt] (zegar elapsedRealtime) */
+        val position: Long,
+        val positionAt: Long,
+        val speed: Float,
+        val duration: Long,
+        val canSeek: Boolean,
+        /** jest żywa sesja (inaczej tylko zapamiętany ostatni odtwarzacz) */
+        val live: Boolean,
+    ) {
+        fun positionNow(): Long {
+            if (!playing || duration <= 0) return position.coerceAtLeast(0)
+            return (position + ((SystemClock.elapsedRealtime() - positionAt) * speed).toLong()).coerceIn(0, duration)
+        }
+    }
+
+    val now = mutableStateOf<Now?>(null)
+
+    private val main = Handler(Looper.getMainLooper())
+    private var ctx: Context? = null
+    private var msm: MediaSessionManager? = null
+    private val callbacks = HashMap<MediaSession.Token, Pair<MediaController, MediaController.Callback>>()
+    private var current: MediaController? = null
+    private var artSource: Bitmap? = null
+    private var art: ImageBitmap? = null
+
+    private val sessionsListener = MediaSessionManager.OnActiveSessionsChangedListener { setControllers(it.orEmpty()) }
+
+    /** Zaczyna śledzić odtwarzacze; false = brak dostępu do powiadomień. */
+    fun attach(c: Context): Boolean {
+        if (msm != null) return true
+        val app = c.applicationContext
+        ctx = app
+        return try {
+            val m = app.getSystemService(MediaSessionManager::class.java)
+            val cn = ComponentName(app, NavListener::class.java)
+            m.addOnActiveSessionsChangedListener(sessionsListener, cn, main)
+            msm = m
+            setControllers(m.getActiveSessions(cn))
+            true
+        } catch (e: SecurityException) {
+            showLast()
+            false
+        }
+    }
+
+    fun detach() {
+        runCatching { msm?.removeOnActiveSessionsChangedListener(sessionsListener) }
+        msm = null
+        callbacks.values.forEach { (c, cb) -> runCatching { c.unregisterCallback(cb) } }
+        callbacks.clear()
+        current = null
+    }
+
+    private fun setControllers(list: List<MediaController>) {
+        val tokens = list.map { it.sessionToken }.toSet()
+        callbacks.keys.filter { it !in tokens }.forEach { t ->
+            callbacks.remove(t)?.let { (c, cb) -> runCatching { c.unregisterCallback(cb) } }
+        }
+        for (c in list) {
+            if (callbacks.containsKey(c.sessionToken)) continue
+            val cb = object : MediaController.Callback() {
+                override fun onPlaybackStateChanged(state: PlaybackState?) = pick()
+                override fun onMetadataChanged(metadata: MediaMetadata?) = pick()
+                override fun onSessionDestroyed() = pick()
+            }
+            runCatching { c.registerCallback(cb, main); callbacks[c.sessionToken] = c to cb }
+        }
+        pick()
+    }
+
+    /** Wybiera odtwarzacz: ten, który gra; inaczej dotychczasowy; inaczej pierwszy z listy (ostatnio używany). */
+    private fun pick() {
+        if (msm == null) return
+        val list = callbacks.values.map { it.first }
+        val playing = list.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
+        val cur = current?.takeIf { c -> list.any { it.sessionToken == c.sessionToken } }
+        // system podaje sesje od ostatnio aktywnej
+        val order = runCatching { msm?.getActiveSessions(ComponentName(ctx!!, NavListener::class.java)) }.getOrNull().orEmpty()
+        val c = playing ?: cur ?: order.firstOrNull()?.let { o -> list.firstOrNull { it.sessionToken == o.sessionToken } } ?: list.firstOrNull()
+        current = c
+        if (c == null) return showLast()
+        val md = c.metadata
+        val st = c.playbackState
+        val title = md?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE) ?: md?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: ""
+        val artist = md?.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: md?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
+            ?: md?.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST) ?: ""
+        val bmp = md?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: md?.getBitmap(MediaMetadata.METADATA_KEY_ART)
+            ?: md?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
+        if (bmp !== artSource) {
+            artSource = bmp
+            art = bmp?.let { runCatching { shrink(it).asImageBitmap() }.getOrNull() }
+        }
+        if (Prefs.lastMediaPkg != c.packageName) Prefs.lastMediaPkg = c.packageName
+        if (title.isNotEmpty() && Prefs.lastMediaTitle != title) Prefs.lastMediaTitle = title
+        now.value = Now(
+            pkg = c.packageName, app = label(c.packageName), title = title, artist = artist, art = art,
+            playing = st?.state == PlaybackState.STATE_PLAYING,
+            position = st?.position ?: 0L,
+            positionAt = st?.lastPositionUpdateTime?.takeIf { it > 0 } ?: SystemClock.elapsedRealtime(),
+            speed = st?.playbackSpeed?.takeIf { it > 0f } ?: 1f,
+            duration = md?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L,
+            canSeek = (st?.actions ?: 0L) and PlaybackState.ACTION_SEEK_TO != 0L,
+            live = true,
+        )
+    }
+
+    /** Brak sesji: pokazujemy ostatni odtwarzacz, żeby dało się go wznowić. */
+    private fun showLast() {
+        val pkg = Prefs.lastMediaPkg
+        now.value = if (pkg.isEmpty()) null else Now(pkg, label(pkg), Prefs.lastMediaTitle, "", null, false, 0, 0, 1f, 0, false, false)
+    }
+
+    private fun label(pkg: String): String {
+        val pm = ctx?.packageManager ?: return pkg
+        return runCatching { pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg)
+    }
+
+    /** Okładki bywają duże (np. 1280 px z YouTube) – do bloku wystarczy 400 px. */
+    private fun shrink(b: Bitmap): Bitmap {
+        val max = maxOf(b.width, b.height)
+        if (max <= 400) return b
+        val k = 400f / max
+        return Bitmap.createScaledBitmap(b, (b.width * k).toInt().coerceAtLeast(1), (b.height * k).toInt().coerceAtLeast(1), true)
+    }
+
+    fun playPause() {
+        val c = current
+        if (c == null) return key(KeyEvent.KEYCODE_MEDIA_PLAY)
+        if (c.playbackState?.state == PlaybackState.STATE_PLAYING) c.transportControls.pause() else c.transportControls.play()
+    }
+
+    fun next() = current?.transportControls?.skipToNext() ?: key(KeyEvent.KEYCODE_MEDIA_NEXT)
+    fun previous() = current?.transportControls?.skipToPrevious() ?: key(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+    fun seekTo(ms: Long) { current?.transportControls?.seekTo(ms) }
+
+    /** Przycisk multimediów wprost do ostatniego odtwarzacza (gdy nie ma już sesji). */
+    private fun key(code: Int) {
+        val c = ctx ?: return
+        val pkg = Prefs.lastMediaPkg
+        try {
+            if (pkg.isNotEmpty()) {
+                for (a in listOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP)) {
+                    c.sendBroadcast(Intent(Intent.ACTION_MEDIA_BUTTON).setPackage(pkg).putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(a, code)))
+                }
+            } else {
+                val am = c.getSystemService(AudioManager::class.java)
+                am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, code))
+                am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, code))
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "przycisk: $e")
+        }
+    }
+
+    /** Otwiera aplikację odtwarzacza (jej ekran „teraz gra”, jeśli go podaje). */
+    fun open(act: Context) {
+        val pkg = now.value?.pkg ?: return
+        val pi = current?.sessionActivity
+        if (pi != null && runCatching { pi.send() }.isSuccess) return
+        act.packageManager.getLaunchIntentForPackage(pkg)?.let { i ->
+            runCatching { act.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        }
+    }
+}
+
+private fun clock(ms: Long): String {
+    val s = (ms / 1000).coerceAtLeast(0)
+    return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
+}
+
+@Composable
+fun MediaBlock(modifier: Modifier, slot: Slot, act: MainActivity) {
+    val visible by act.visible
+    val tick = act.resumeTick.intValue
+    var access by remember { mutableStateOf(true) }
+    // śledzenie odtwarzaczy tylko, gdy Kokpit jest na ekranie
+    DisposableEffect(visible, tick) {
+        if (visible) access = MediaHub.attach(act)
+        onDispose { MediaHub.detach() }
+    }
+    val now by MediaHub.now
+    // pozycja utworu: co sekundę, tylko gdy gra i blok widać
+    var pos by remember { mutableLongStateOf(0L) }
+    var drag by remember { mutableFloatStateOf(-1f) }
+    LaunchedEffect(now, visible) {
+        val n = now ?: return@LaunchedEffect
+        pos = n.positionNow()
+        while (visible && n.playing && n.duration > 0) {
+            delay(1000)
+            pos = n.positionNow()
+        }
+    }
+    Block(modifier) {
+        val n = now
+        if (n == null) {
+            Column(
+                Modifier.fillMaxSize().combinedClickable(onClick = {
+                    if (!access) runCatching { act.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                }).padding(d(24)),
+            ) {
+                Label(Icons.Outlined.MusicNote, "Multimedia")
+                Spacer(Modifier.weight(1f))
+                Text(if (access) "Nic nie gra" else "Zezwól na dostęp do powiadomień", color = if (access) Dim else Accent, fontSize = s(24))
+                Text(if (access) "Włącz muzykę albo film w dowolnej aplikacji" else "Kokpit zobaczy wtedy, co gra, i będzie tym sterować",
+                    color = Dim, fontSize = s(19), modifier = Modifier.padding(top = d(8)))
+                Spacer(Modifier.weight(1f))
+            }
+            return@Block
+        }
+        val wide = slot.w >= 2
+        val tall = slot.h >= 2
+        val controls: @Composable (Modifier) -> Unit = { m ->
+            Column(m) {
+                if (n.live && n.duration > 0) {
+                    val frac = if (drag >= 0f) drag else (pos.toFloat() / n.duration).coerceIn(0f, 1f)
+                    Slider(
+                        value = frac,
+                        onValueChange = { if (n.canSeek) drag = it },
+                        onValueChangeFinished = {
+                            if (drag >= 0f) {
+                                val to = (drag * n.duration).toLong()
+                                MediaHub.seekTo(to); pos = to; drag = -1f
+                            }
+                        },
+                        enabled = n.canSeek,
+                        colors = SliderDefaults.colors(
+                            thumbColor = Accent, activeTrackColor = Accent, inactiveTrackColor = Line,
+                            disabledThumbColor = Dim, disabledActiveTrackColor = Dim, disabledInactiveTrackColor = Line,
+                        ),
+                        modifier = Modifier.fillMaxWidth().height(d(40)),
+                    )
+                    Row(Modifier.fillMaxWidth()) {
+                        Text(clock(if (drag >= 0f) (drag * n.duration).toLong() else pos), color = Dim, fontSize = s(16))
+                        Spacer(Modifier.weight(1f))
+                        Text(clock(n.duration), color = Dim, fontSize = s(16))
+                    }
+                    Spacer(Modifier.height(d(8)))
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(d(10)), verticalAlignment = Alignment.CenterVertically) {
+                    val h = if (slot.w == 1) d(54) else d(64)
+                    MediaButton(Icons.Rounded.SkipPrevious, "Poprzedni", Modifier.weight(1f).height(h), false) { MediaHub.previous() }
+                    MediaButton(if (n.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (n.playing) "Wstrzymaj" else "Graj",
+                        Modifier.weight(1.3f).height(h), true) { MediaHub.playPause() }
+                    MediaButton(Icons.Rounded.SkipNext, "Następny", Modifier.weight(1f).height(h), false) { MediaHub.next() }
+                }
+            }
+        }
+        val titles: @Composable () -> Unit = {
+            Text(n.title.ifEmpty { n.app }, color = Txt, fontSize = s(if (wide) 26 else 22), fontWeight = FontWeight.Medium,
+                maxLines = if (tall || !wide) 2 else 1, overflow = TextOverflow.Ellipsis)
+            Text(listOf(n.artist, n.app).filter { it.isNotEmpty() && it != n.title }.distinct().joinToString(" · "),
+                color = Dim, fontSize = s(18), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = d(4)))
+        }
+        val cover: @Composable (Modifier) -> Unit = { m ->
+            Box(
+                m.clip(RoundedCornerShape(d(18))).background(LocalTheme.current.blockEdge).combinedClickable(onClick = { MediaHub.open(act) }),
+                contentAlignment = Alignment.Center,
+            ) {
+                val a = n.art
+                if (a != null) Image(a, "Okładka", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                else Icon(Icons.Outlined.MusicNote, null, tint = Dim, modifier = Modifier.size(d(56)))
+            }
+        }
+        when {
+            // wysoki blok: okładka na górze, pod nią tytuł i przyciski
+            tall -> Column(Modifier.fillMaxSize().padding(d(24))) {
+                cover(Modifier.weight(1f).fillMaxWidth())
+                Spacer(Modifier.height(d(14)))
+                titles()
+                Spacer(Modifier.height(d(10)))
+                controls(Modifier.fillMaxWidth())
+            }
+            // szeroki niski: okładka z lewej
+            wide -> Row(Modifier.fillMaxSize().padding(d(22)), verticalAlignment = Alignment.CenterVertically) {
+                cover(Modifier.fillMaxHeight().aspectRatio(1f))
+                Spacer(Modifier.width(d(22)))
+                Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.Center) {
+                    titles()
+                    Spacer(Modifier.weight(1f))
+                    controls(Modifier.fillMaxWidth())
+                }
+            }
+            // wąski niski: sam tytuł i przyciski (dotknięcie tytułu otwiera aplikację)
+            else -> Column(Modifier.fillMaxSize().padding(d(20))) {
+                Column(Modifier.weight(1f).fillMaxWidth().combinedClickable(onClick = { MediaHub.open(act) })) { titles() }
+                controls(Modifier.fillMaxWidth())
+            }
+        }
+    }
+}
+
+@Composable
+private fun MediaButton(icon: ImageVector, desc: String, modifier: Modifier, main: Boolean, onClick: () -> Unit) {
+    Box(modifier.kokpitSurface(d(16), active = main).combinedClickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        Icon(icon, desc, tint = if (main) LocalTheme.current.activeText else Txt, modifier = Modifier.size(d(36)))
+    }
+}

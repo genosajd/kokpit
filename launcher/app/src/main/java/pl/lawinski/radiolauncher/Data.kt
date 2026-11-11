@@ -110,6 +110,19 @@ object Prefs {
         get() = sp.getString("slack_token", "") ?: ""
         set(v) = sp.edit().putString("slack_token", v).apply()
 
+    /** reguły właściciela (Rules.kt), tablica JSON */
+    var rules: String
+        get() = sp.getString("rules", "[]") ?: "[]"
+        set(v) = sp.edit().putString("rules", v).apply()
+
+    /** ostatni odtwarzacz i tytuł – blok Multimedia wznawia go, gdy nie ma już sesji */
+    var lastMediaPkg: String
+        get() = sp.getString("last_media_pkg", "") ?: ""
+        set(v) = sp.edit().putString("last_media_pkg", v).apply()
+    var lastMediaTitle: String
+        get() = sp.getString("last_media_title", "") ?: ""
+        set(v) = sp.edit().putString("last_media_title", v).apply()
+
     /** w czasie nawigacji ukrywaj wyskakujące z góry komunikaty (NavPopups) */
     var hideNavPopups: Boolean
         get() = sp.getBoolean("hide_nav_popups", true)

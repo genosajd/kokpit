@@ -27,6 +27,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Hearing
+import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.DataUsage
 import androidx.compose.material.icons.outlined.Thermostat
 import androidx.compose.material.icons.outlined.Close
@@ -219,6 +221,8 @@ fun SettingsDialog(
     var micGain by remember { mutableStateOf(Prefs.micGain) }
     var phrase by remember { mutableStateOf(Prefs.hotwordPhrase) }
     var phraseDlg by remember { mutableStateOf(false) }
+    var editRule by remember { mutableStateOf<Pair<Rule, Boolean>?>(null) }
+    editRule?.let { (r, isNew) -> RuleDialog(r, isNew, act) { editRule = null } }
     if (phraseDlg) HotwordPhraseDialog { phraseDlg = false; phrase = Prefs.hotwordPhrase }
     var tokenLimit by remember { mutableStateOf(Prefs.aiTokenLimit) }
     val ttsEngine = Prefs.ttsEngine
@@ -367,6 +371,17 @@ fun SettingsDialog(
                     }
                 }
                 item { SettingTile(Icons.Outlined.PlayCircle, "Pokaz danych auta", if (demo) "Paliwo i drzwi to dane przykładowe" else "Paliwo i drzwi z modułu CAN radia", on = demo) { onDemo(!demo) } }
+                    }
+                    9 -> {
+                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                    Text("Jeśli warunek jest spełniony, asystent mówi albo robi to, co wpiszesz. Liczby Kokpit sprawdza sam co 30 s, Slack co 2 min.",
+                        color = Dim, fontSize = s(20), modifier = Modifier.padding(bottom = d(4)))
+                }
+                items(Rules.list.size) { i ->
+                    val r = Rules.list[i]
+                    SettingTile(Icons.Outlined.Bolt, r.summary(), if (r.complete()) r.text.replace('\n', ' ').take(90) else "Niepełna – dotknij, aby uzupełnić", on = r.on) { editRule = r to false }
+                }
+                item { SettingTile(Icons.Outlined.Add, "Dodaj regułę", "Np. paliwo mniej niż 10 l albo wiadomość na Slacku") { editRule = Rule(id = System.currentTimeMillis()) to true } }
                     }
                     8 -> {
                 item {
@@ -545,6 +560,7 @@ private val SETTINGS_GROUPS = listOf(
         "Auto" to Icons.Outlined.DirectionsCar,
         "Asystent AI" to Icons.Outlined.SmartToy,
         "Dom (Smart Life)" to Icons.Outlined.AcUnit,
+        "Reguły" to Icons.Outlined.Bolt,
 )
 
 /** Kafelek ustawienia: ikona, tytuł, opis; `on` pokazuje stan przełącznika (Wł./Wył.). */

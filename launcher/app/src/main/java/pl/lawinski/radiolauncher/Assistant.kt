@@ -764,7 +764,11 @@ object Assistant {
         }
     }
 
-    fun send(act: MainActivity, text: String) {
+    /**
+     * [shown] – co pokazać w rozmowie zamiast pełnej treści (reguły wysyłają dłuższe polecenie);
+     * [speak] – czytaj odpowiedź na głos nawet przy wyłączonym czytaniu (reguły).
+     */
+    fun send(act: MainActivity, text: String, shown: String? = null, speak: Boolean = false) {
         val t = text.trim()
         if (t.isEmpty() || busy.value) return
         if (!hasKey()) {
@@ -776,7 +780,7 @@ object Assistant {
             reset()
             lines += ChatLine(false, "Rozmowa przekroczyła limit tokenów – zaczynam nową.")
         }
-        lines += ChatLine(true, t)
+        lines += ChatLine(true, shown ?: t)
         Slack.turn++ // potwierdzenie wysłania wiadomości Slack musi przyjść w nowej wypowiedzi
         busy.value = true
         scope.launch {
@@ -793,7 +797,7 @@ object Assistant {
             busy.value = false
             lines += ChatLine(false, reply)
             ok?.let { tokens.value = it.tokens; save(it) }
-            if (Prefs.aiSpeak) act.speak(reply)
+            if (Prefs.aiSpeak || speak) act.speak(reply)
             // bez bloku „Asystent” na ekranie (wywołanie przyciskiem głosowym) pokaż odpowiedź w dymku
             if (!VoiceActivity.open && act.layout.value.none { it.id == BlockId.ASSISTANT }) android.widget.Toast.makeText(act, reply, android.widget.Toast.LENGTH_LONG).show()
         }

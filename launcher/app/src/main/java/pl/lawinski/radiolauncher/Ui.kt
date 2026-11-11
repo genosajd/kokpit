@@ -37,6 +37,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AcUnit
 import androidx.compose.material.icons.outlined.DirectionsCar
 import androidx.compose.material.icons.outlined.Lightbulb
+import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.WaterDrop
 import androidx.compose.material.icons.outlined.Air
@@ -277,6 +278,7 @@ fun LauncherScreen(act: MainActivity) {
                                 BlockId.NAV -> NavBlock(m, slot, act, onAddress = { dialog = Dlg.Address(it) }, onPlace3 = { dialog = Dlg.Place3 })
                                 BlockId.CAMERA -> CameraBlock(m, act, onChoose = { dialog = Dlg.Cameras })
                                 BlockId.WEATHER -> WeatherBlock(m, slot, act)
+                                BlockId.MEDIA -> MediaBlock(m, slot, act)
                                 BlockId.CLIMATE -> ClimateBlock(m, slot, act, onSettings = { Prefs.settingsGroup = 8; dialog = Dlg.Settings })
                                 BlockId.TUYA -> TuyaDeviceBlock(m, slot, act, onChoose = { dialog = Dlg.TuyaDevices(slot.n) }, onSettings = { Prefs.settingsGroup = 8; dialog = Dlg.Settings })
                                 BlockId.ASSISTANT -> AssistantBlock(m, slot, act, onSettings = { Prefs.settingsGroup = 7; dialog = Dlg.Settings })
@@ -535,6 +537,7 @@ private fun blockInfo(id: BlockId) = when (id) {
     BlockId.ASSISTANT -> BlockInfo(Icons.Outlined.SmartToy, "„Jaka będzie pogoda?”", "Rozmowa z asystentem AI, pisana i głosowa")
     BlockId.CLIMATE -> BlockInfo(Icons.Outlined.AcUnit, "20,6° w domu", "Klimatyzator w domu (Smart Life)")
     BlockId.TUYA -> BlockInfo(Icons.Outlined.Lightbulb, "Światło · czujnik", "Urządzenie Smart Life – można dodać kilka")
+    BlockId.MEDIA -> BlockInfo(Icons.Outlined.MusicNote, "Tytuł · wykonawca", "Steruje tym, co gra: YouTube, SoundCloud i inne")
 }
 
 /** Okno „Widżety” w edycji układu: siatka klocków z podglądem i nazwą; dotknięcie dodaje klocek do ekranu. */

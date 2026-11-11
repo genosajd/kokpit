@@ -139,6 +139,44 @@ object Slack {
         return (withChannel?.let { "$it · " } ?: "") + "$ts $who: ${clean(m.optString("text")).take(400)}$replies"
     }
 
+    /**
+     * Nowe wiadomości dla reguł Kokpitu (Rules.kt), nowsze niż [since] (znacznik czasu Slacka):
+     * od osoby w rozmowie bezpośredniej, na kanale (cudze) albo z oznaczeniem mnie.
+     * Zwraca opisy wiadomości (od najstarszej) i najnowszy znacznik czasu.
+     */
+    fun fresh(kind: RuleSource, target: String, since: String): Pair<List<String>, String> {
+        val from = since.toDoubleOrNull() ?: 0.0
+        val mine = me()
+        val found = mutableListOf<Pair<Double, String>>()
+        if (kind == RuleSource.SLACK_MENTION) {
+            val r = api("search.messages", mapOf("query" to "<@$mine>", "count" to "10", "sort" to "timestamp"))
+            val a = r.optJSONObject("messages")?.optJSONArray("matches") ?: JSONArray()
+            for (i in 0 until a.length()) {
+                val m = a.getJSONObject(i)
+                val ts = m.optString("ts").toDoubleOrNull() ?: continue
+                if (ts <= from || m.optString("user") == mine) continue
+                val ch = m.optJSONObject("channel")
+                found += ts to line(m, if (ch?.optBoolean("is_im") == true) "prywatnie" else "#" + ch?.optString("name").orEmpty())
+            }
+        } else {
+            val c = find(target) ?: throw SlackError("nie znam rozmowy „$target”")
+            if (c.id == c.user) return emptyList<String>() to since // z tą osobą nie ma jeszcze rozmowy
+            if (kind == RuleSource.SLACK_PERSON && !c.isIm) throw SlackError("„$target” to nie osoba")
+            val r = api("conversations.history", mapOf("channel" to c.id, "oldest" to since, "limit" to "10"))
+            val a = r.optJSONArray("messages") ?: JSONArray()
+            for (i in 0 until a.length()) {
+                val m = a.getJSONObject(i)
+                val ts = m.optString("ts").toDoubleOrNull() ?: continue
+                val sub = m.optString("subtype")
+                if (ts <= from || m.optString("user") == mine || (sub.isNotEmpty() && sub != "thread_broadcast")) continue
+                found += ts to line(m, c.name)
+            }
+        }
+        val sorted = found.sortedBy { it.first }
+        val newest = sorted.lastOrNull()?.first?.let { "%.6f".format(Locale.US, it) } ?: since
+        return sorted.map { it.second } to newest
+    }
+
     // ---------- działania narzędzia ----------
 
     fun run(input: JSONObject): String {

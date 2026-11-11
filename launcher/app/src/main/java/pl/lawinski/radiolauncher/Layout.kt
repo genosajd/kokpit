@@ -55,6 +55,7 @@ enum class BlockId(val title: String, val minW: Int, val minH: Int, val multi: B
     ASSISTANT("Asystent", 1, 1),
     CLIMATE("Klima", 1, 1),
     TUYA("Urządzenie Tuya", 1, 1, multi = true),
+    MEDIA("Multimedia", 1, 1),
 }
 
 /** Położenie klocka na siatce 8 × 2: kolumna, rząd, szerokość, wysokość; n = numer egzemplarza. */
