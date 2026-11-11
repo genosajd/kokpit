@@ -266,6 +266,13 @@ class VoiceActivity : ComponentActivity() {
             }
         }
         val accent = Accent
+        // okienko w wybranym wyglądzie Kokpitu (kolory, kształt rogów, krój pisma, tryb jasny)
+        val theme = effectiveTheme()
+        val shape = theme.shape(28.dp)
+        androidx.compose.runtime.CompositionLocalProvider(
+            LocalTheme provides theme,
+            androidx.compose.material3.LocalTextStyle provides androidx.compose.material3.LocalTextStyle.current.copy(fontFamily = Fonts.family(ThemeCustoms.current().font)),
+        ) {
         Box(
             Modifier
                 .fillMaxSize()
@@ -278,9 +285,10 @@ class VoiceActivity : ComponentActivity() {
                     .padding(bottom = 28.dp)
                     .widthIn(max = 760.dp)
                     .fillMaxWidth(0.62f)
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(Color(0xF2141A22))
-                    .border(1.dp, accent.copy(alpha = 0.45f), RoundedCornerShape(28.dp))
+                    .clip(shape)
+                    .background(if (LightMode.on) Color(0xFFF4F6FA) else Color(0xFF0A0D14)) // pod spodem pełne tło: bloki bywają półprzezroczyste
+                    .background(theme.block)
+                    .border(1.5.dp, theme.blockEdge, shape)
                     .clickable(interactionSource = remember0(), indication = null) { activity.value++ }
                     .padding(horizontal = 28.dp, vertical = 22.dp),
             ) {
@@ -291,27 +299,27 @@ class VoiceActivity : ComponentActivity() {
                         modifier = Modifier.weight(1f),
                     )
                     Icon(
-                        Icons.Filled.Close, "Zamknij", tint = Color(0xFF9AA4B2),
+                        Icons.Filled.Close, "Zamknij", tint = Dim,
                         modifier = Modifier.size(34.dp).clip(CircleShape).clickable { Speech.stop(); stopAndClose() }.padding(5.dp),
                     )
                 }
                 Spacer(Modifier.size(10.dp))
                 val h by heard
                 if (h.isNotBlank()) {
-                    Text("„$h”", color = Color(0xFFB8C2D0), fontSize = 20.sp)
+                    Text("„$h”", color = Dim, fontSize = 20.sp)
                     Spacer(Modifier.size(12.dp))
                 }
                 val a by answer
                 when (p) {
-                    Phase.LISTENING -> if (h.isBlank()) Text("Słucham…", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Medium)
+                    Phase.LISTENING -> if (h.isBlank()) Text("Słucham…", color = Txt, fontSize = 26.sp, fontWeight = FontWeight.Medium)
                     Phase.THINKING -> Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(color = accent, strokeWidth = 3.dp, modifier = Modifier.size(26.dp))
                         Spacer(Modifier.width(14.dp))
-                        Text("Myślę…", color = Color.White, fontSize = 22.sp)
+                        Text("Myślę…", color = Txt, fontSize = 22.sp)
                     }
                     Phase.ANSWER, Phase.ERROR -> Text(
                         a,
-                        color = if (p == Phase.ERROR) Warn else Color.White,
+                        color = if (p == Phase.ERROR) Warn else Txt,
                         fontSize = 22.sp, lineHeight = 30.sp,
                         modifier = Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState()),
                     )
@@ -323,6 +331,7 @@ class VoiceActivity : ComponentActivity() {
                     }
                 }
             }
+        }
         }
     }
 
@@ -338,11 +347,11 @@ class VoiceActivity : ComponentActivity() {
                 Modifier
                     .size(60.dp)
                     .clip(CircleShape)
-                    .background(if (enabled) accent else Color(0xFF3A4350))
+                    .then(if (enabled) Modifier.background(LocalTheme.current.active) else Modifier.background(Color(0xFF3A4350)))
                     .clickable(enabled = enabled, onClick = onClick),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.Mic, if (listening) "Skończ mówić" else "Mów", tint = Color.White, modifier = Modifier.size(32.dp))
+                Icon(Icons.Filled.Mic, if (listening) "Skończ mówić" else "Mów", tint = if (enabled) LocalTheme.current.activeText else Color.White, modifier = Modifier.size(32.dp))
             }
         }
     }
