@@ -196,6 +196,11 @@ object LayoutStore {
     }
 }
 
+/** O ile pikseli siatka klocków jest przewinięta w bok (0 = pierwsza strona). */
+object GridScroll {
+    val px = androidx.compose.runtime.mutableFloatStateOf(0f)
+}
+
 /**
  * Klocki, do których przechodzi zaznaczenie z klocka [from] w stronę [dir] (0 lewo, 1 prawo, 2 góra, 3 dół),
  * od najbliższego. Bez zaznaczenia – pierwszy klocek widocznej strony ([firstCol] = pierwsza widoczna kolumna).
@@ -257,6 +262,11 @@ fun BlockGrid(
                 if (x < scroll.value || x + s.w * colStep > scroll.value + with(density) { pageW.toPx() })
                     scroll.animateScrollTo((x - colStep.toInt() * (8 - s.w).coerceAtLeast(0) / 2).coerceIn(0, scroll.maxValue))
             }
+        }
+        // przesunięcie stron dla tła (wygląd z ukośnym światłem przesuwa je wolniej niż klocki)
+        androidx.compose.runtime.LaunchedEffect(scroll, scrolling) {
+            if (!scrolling) GridScroll.px.floatValue = 0f
+            else androidx.compose.runtime.snapshotFlow { scroll.value }.collect { GridScroll.px.floatValue = it.toFloat() }
         }
         val cellH = (maxHeight - gap * (GRID_ROWS - 1)) / GRID_ROWS
         // Przechył pokrętła iDrive (strzałki): zaznaczenie skacze do sąsiedniego klocka; obrót (Tab) chodzi po przyciskach.

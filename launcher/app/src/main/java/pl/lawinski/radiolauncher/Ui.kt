@@ -244,8 +244,13 @@ fun LauncherScreen(act: MainActivity) {
                         }
                         scope.drawPath(p, Brush.horizontalGradient(listOf(c, Color.Transparent), startX = x0 - lean, endX = x1 + lean))
                     }
-                    plane(0.30f, 0.47f, c1)
-                    plane(0.60f, 0.74f, c2)
+                    // przy przewijaniu stron światło sunie wolniej niż klocki (głębia); kolejne pasy wchodzą z prawej
+                    val shift = GridScroll.px.floatValue * 0.4f / w
+                    plane(0.30f - shift, 0.47f - shift, c1)
+                    plane(0.60f - shift, 0.74f - shift, c2)
+                    plane(1.02f - shift, 1.22f - shift, c1)
+                    plane(1.38f - shift, 1.50f - shift, c2)
+                    plane(1.74f - shift, 1.93f - shift, c1)
                 }
                 .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.displayCutout))
         ) {
