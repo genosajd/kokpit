@@ -14,7 +14,7 @@ import org.json.JSONObject
 /*
  * Reguły właściciela (Ustawienia → Reguły): „jeśli <warunek>, to asystent ma powiedzieć / zrobić <tekst>”.
  * Warunki liczbowe (paliwo, akumulator, temperatury, prędkość…) Kokpit sprawdza sam co 30 s – bez internetu
- * i bez tokenów. Slack (wiadomość od osoby, na kanale, oznaczenie) – jedno zapytanie do Slacka co 2 min na regułę.
+ * i bez tokenów. Slack (wiadomość od osoby, na kanale, oznaczenie) – jedno zapytanie do Slacka co minutę na regułę.
  * Dopiero spełniony warunek uruchamia asystenta (albo samo odczytanie tekstu, gdy reguła ma wyłączone „przez asystenta”).
  * Kamera: w wybranym momencie (co ustawioną przerwę, po ruszeniu, o godzinie) asystent dostaje zdjęcie i polecenie właściciela;
  * każde sprawdzenie to płatne zapytanie, a odzywa się tylko, gdy jest co zgłosić.
@@ -88,7 +88,7 @@ data class Rule(
         .put("text", text).put("ai", ai).put("cooldown", cooldownMin).put("fired", lastFired).put("slackTs", slackTs).put("moment", moment).put("time", time)
 
     companion object {
-        val COOLDOWNS = listOf(5 to "5 min", 15 to "15 min", 60 to "godzinę", 240 to "4 godziny", 1440 to "dobę")
+        val COOLDOWNS = listOf(1 to "minutę", 5 to "5 min", 15 to "15 min", 60 to "godzinę", 240 to "4 godziny", 1440 to "dobę")
 
         fun from(o: JSONObject) = Rule(
             id = o.optLong("id"), on = o.optBoolean("on", true),
@@ -186,7 +186,7 @@ object Rules {
                 wasTrue[r.id] = true
             }
         }
-        if (n % 4 == 0 && Slack.configured) for (r in active.filter { it.source.slack }) slack(act, r)
+        if (n % 2 == 0 && Slack.configured) for (r in active.filter { it.source.slack }) slack(act, r)
         cameras(act, active.filter { it.source.camera })
     }
 

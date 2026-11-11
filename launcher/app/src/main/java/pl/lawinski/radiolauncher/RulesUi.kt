@@ -104,7 +104,7 @@ fun RuleDialog(rule: Rule, isNew: Boolean, act: MainActivity, onClose: () -> Uni
                     )
                     if (!Slack.configured) Text("Slack nie jest połączony (Asystent AI → Slack)", color = Warn, fontSize = s(20))
                 } else {
-                    Text(if (Slack.configured) "Sprawdzane co 2 minuty we wszystkich rozmowach" else "Slack nie jest połączony (Asystent AI → Slack)",
+                    Text(if (Slack.configured) "Sprawdzane co minutę we wszystkich rozmowach" else "Slack nie jest połączony (Asystent AI → Slack)",
                         color = if (Slack.configured) Dim else Warn, fontSize = s(20))
                 }
             }

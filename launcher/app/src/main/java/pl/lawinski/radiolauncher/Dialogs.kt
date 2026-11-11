@@ -374,7 +374,7 @@ fun SettingsDialog(
                     }
                     9 -> {
                 item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
-                    Text("Jeśli warunek jest spełniony, asystent mówi albo robi to, co wpiszesz. Liczby Kokpit sprawdza sam co 30 s, Slack co 2 min. Kamera: asystent dostaje zdjęcie w wybranym momencie i odzywa się tylko, gdy jest co zgłosić.",
+                    Text("Jeśli warunek jest spełniony, asystent mówi albo robi to, co wpiszesz. Liczby Kokpit sprawdza sam co 30 s, Slack co minutę. Kamera: asystent dostaje zdjęcie w wybranym momencie i odzywa się tylko, gdy jest co zgłosić.",
                         color = Dim, fontSize = s(20), modifier = Modifier.padding(bottom = d(4)))
                 }
                 items(Rules.list.size) { i ->
