@@ -20,6 +20,7 @@ class NavListener : NotificationListenerService() {
     private var currentKey: String? = null
 
     override fun onListenerConnected() {
+        live = this
         try {
             activeNotifications?.forEach { onNotificationPosted(it) }
         } catch (_: Exception) {
@@ -49,6 +50,7 @@ class NavListener : NotificationListenerService() {
     }
 
     override fun onListenerDisconnected() {
+        if (live === this) live = null
         NavState.info.value = null
         NavPopups.apply(this, false)
     }
@@ -62,6 +64,28 @@ class NavListener : NotificationListenerService() {
 
     companion object {
         val NAV_APPS = setOf("com.google.android.apps.maps", "com.waze")
+
+        @Volatile
+        private var live: NavListener? = null
+
+        /** Duży obrazek z powiadomienia odtwarzacza [pkg] (okładka utworu), jeśli takie powiadomienie jest. */
+        fun largeIcon(pkg: String): android.graphics.Bitmap? {
+            val svc = live ?: return null
+            return try {
+                svc.activeNotifications.orEmpty().filter { it.packageName == pkg }.firstNotNullOfOrNull { sbn ->
+                    val d = sbn.notification.getLargeIcon()?.loadDrawable(svc) ?: return@firstNotNullOfOrNull null
+                    val w = d.intrinsicWidth.takeIf { it > 0 } ?: 256
+                    val h = d.intrinsicHeight.takeIf { it > 0 } ?: 256
+                    // rysujemy na zwykłej bitmapie – obrazek z powiadomienia bywa „sprzętowy” i nie da się go skalować
+                    android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888).also { b ->
+                        d.setBounds(0, 0, w, h)
+                        d.draw(android.graphics.Canvas(b))
+                    }
+                }
+            } catch (e: Exception) {
+                null
+            }
+        }
 
         fun isEnabled(ctx: Context): Boolean =
             NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)

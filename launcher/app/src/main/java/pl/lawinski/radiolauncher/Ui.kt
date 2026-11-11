@@ -91,6 +91,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.drawscope.scale as drawScale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -234,16 +235,9 @@ fun LauncherScreen(act: MainActivity) {
                 .drawBehind {
                     // ukośne płaszczyzny światła (wygląd iDrive 8): dwa pasy pochylone w prawo, gasnące ku prawej
                     val (c1, c2) = theme.planes ?: return@drawBehind
-                    val w = size.width; val hgt = size.height
-                    val lean = hgt * 0.5f
-                    val scope = this
-                    fun plane(from: Float, to: Float, c: Color) {
-                        val x0 = w * from; val x1 = w * to
-                        val p = androidx.compose.ui.graphics.Path().apply {
-                            moveTo(x0 + lean, 0f); lineTo(x1 + lean, 0f); lineTo(x1 - lean, hgt); lineTo(x0 - lean, hgt); close()
-                        }
-                        scope.drawPath(p, Brush.horizontalGradient(listOf(c, Color.Transparent), startX = x0 - lean, endX = x1 + lean))
-                    }
+                    val w = size.width
+                    val lean = size.height * 0.5f
+                    fun plane(from: Float, to: Float, c: Color) = lightPlane(w * from, w * to, lean, c, c.copy(alpha = c.alpha * 0.08f))
                     // przy przewijaniu stron światło sunie wolniej niż klocki (głębia); kolejne pasy wchodzą z prawej
                     val shift = GridScroll.px.floatValue * 0.4f / w
                     plane(0.30f - shift, 0.47f - shift, c1)
@@ -364,6 +358,21 @@ fun LauncherScreen(act: MainActivity) {
 val isWitstek: Boolean by lazy {
     runCatching { Class.forName("android.os.SystemProperties").getMethod("get", String::class.java).invoke(null, "ro.wits.machine.id") as String }
         .getOrNull().orEmpty().isNotBlank()
+}
+
+/**
+ * Ukośny pas światła: w połowie wysokości zajmuje x0..x1, u góry jest przesunięty o [lean] w prawo, u dołu w lewo.
+ * Gaśnie w poprzek pasa – od [from] przy lewej krawędzi do [to] przy prawej (na całej wysokości tak samo).
+ */
+fun androidx.compose.ui.graphics.drawscope.DrawScope.lightPlane(x0: Float, x1: Float, lean: Float, from: Color, to: Color) {
+    val h = size.height
+    val p = androidx.compose.ui.graphics.Path().apply {
+        moveTo(x0 + lean, 0f); lineTo(x1 + lean, 0f); lineTo(x1 - lean, h); lineTo(x0 - lean, h); close()
+    }
+    val len = kotlin.math.sqrt(h * h + 4f * lean * lean)
+    val across = (x1 - x0) * h / len // szerokość pasa mierzona prostopadle do jego krawędzi
+    val start = Offset(x0, h / 2f)
+    drawPath(p, Brush.linearGradient(listOf(from, to), start, Offset(start.x + h / len * across, start.y + 2f * lean / len * across)))
 }
 
 @Composable
@@ -847,8 +856,38 @@ fun CarBlock(modifier: Modifier, act: MainActivity, apps: List<AppEntry>, edit: 
     }
     Block(modifier) {
         val theme = LocalTheme.current
-        Box(Modifier.fillMaxSize().background(theme.carBack)) {
-            if (LocalAnimate.current) CarGlow(theme.glow)
+        val carTop = d(70)
+        // wygląd z ukośnym światłem (iDrive 8): poświata „oddycha” pod kołami zamiast na dole bloku
+        val floorPulse = if (theme.planes != null && LocalAnimate.current) loop(4000) else null
+        Box(
+            Modifier.fillMaxSize().background(theme.carBack).drawBehind {
+                // pas światła za autem, niebieska poświata na „podłodze” i cień pod kołami – jak w projekcie wyglądu
+                val c = theme.planes?.first ?: return@drawBehind
+                val w = size.width; val hgt = size.height
+                // gdzie stoi zdjęcie auta (ramka 1200×500 wpisana w blok, patrz Image niżej): koła są przy dolnej krawędzi ramki
+                val top = carTop.toPx()
+                val k = minOf(w * 0.95f / 1200f, (hgt - top) / 500f)
+                val fw = 1200f * k; val fh = 500f * k
+                val cx = w / 2f
+                val floor = (hgt + top) / 2f + fh * 0.44f
+                val lean = hgt * 0.5f // ten sam kąt co pasy w tle ekranu
+                val x0 = cx - fw * 0.10f; val x1 = cx + fw * 0.34f
+                // jak w projekcie: jasny przy lewej krawędzi pasa, przy prawej prawie niewidoczny
+                lightPlane(x0, x1, lean, c.copy(alpha = 0.30f), c.copy(alpha = 0.02f))
+                val glowC = Offset(cx + fw * 0.04f, floor)
+                val r = fw * 0.56f
+                val a = 0.55f + 0.2f * (floorPulse?.value ?: 0.5f)
+                drawScale(1f, 0.26f, pivot = glowC) {
+                    drawCircle(Brush.radialGradient(listOf(c.copy(alpha = a), Color.Transparent), glowC, r), r, glowC)
+                }
+                val shadowC = Offset(cx, floor - fh * 0.02f)
+                val sr = fw * 0.36f
+                drawScale(1f, 0.11f, pivot = shadowC) {
+                    drawCircle(Brush.radialGradient(listOf(Color(0xB3000000), Color.Transparent), shadowC, sr), sr, shadowC)
+                }
+            }
+        ) {
+            if (LocalAnimate.current && theme.planes == null) CarGlow(theme.glow)
             when {
                 car.open.isNotEmpty() -> Row(Modifier.fillMaxSize().padding(vertical = d(24)), verticalAlignment = Alignment.CenterVertically) {
                     Spacer(Modifier.weight(1f))

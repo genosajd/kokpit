@@ -104,8 +104,56 @@ object MediaHub {
     private var msm: MediaSessionManager? = null
     private val callbacks = HashMap<MediaSession.Token, Pair<MediaController, MediaController.Callback>>()
     private var current: MediaController? = null
-    private var artSource: Bitmap? = null
+    /** skąd jest bieżąca okładka: bitmapa z sesji, adres okładki albo „powiadomienie pakietu + tytuł” */
+    private var artKey: Any? = null
     private var art: ImageBitmap? = null
+    private val artIo = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    /**
+     * Okładka utworu. Część odtwarzaczy (np. SoundCloud) nie wkłada obrazka do sesji multimediów –
+     * podaje tylko jego adres albo pokazuje go wyłącznie w swoim powiadomieniu. Wtedy pobieramy ją w tle.
+     */
+    private fun cover(c: MediaController, md: MediaMetadata?, title: String) {
+        val bmp = md?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: md?.getBitmap(MediaMetadata.METADATA_KEY_ART)
+            ?: md?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
+        if (bmp != null) {
+            if (bmp !== artKey) {
+                artKey = bmp
+                art = runCatching { shrink(bmp).asImageBitmap() }.getOrNull()
+            }
+            return
+        }
+        val uri = listOf(MediaMetadata.METADATA_KEY_ART_URI, MediaMetadata.METADATA_KEY_ALBUM_ART_URI, MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI)
+            .firstNotNullOfOrNull { k -> md?.getString(k)?.takeIf { it.isNotBlank() } }
+        val pkg = c.packageName
+        val key = uri ?: "powiadomienie:$pkg|$title"
+        if (key == artKey) return
+        artKey = key
+        art = null
+        artIo.execute {
+            var b = uri?.let { runCatching { load(it) }.getOrNull() } ?: NavListener.largeIcon(pkg)
+            if (b == null) {
+                // powiadomienie odtwarzacza bywa odświeżane chwilę po zmianie utworu
+                Thread.sleep(1500)
+                b = NavListener.largeIcon(pkg)
+            }
+            android.util.Log.d("KokpitMedia", "okładka $pkg: sesja bez obrazka, adres=${uri != null}, wynik=${b != null}")
+            val img = b?.let { runCatching { shrink(it).asImageBitmap() }.getOrNull() }
+            main.post {
+                if (artKey == key && img != null) {
+                    art = img
+                    pick()
+                }
+            }
+        }
+    }
+
+    private fun load(uri: String): Bitmap? {
+        val stream = if (uri.startsWith("http://") || uri.startsWith("https://")) {
+            (java.net.URL(uri).openConnection() as java.net.HttpURLConnection).apply { connectTimeout = 5000; readTimeout = 8000 }.inputStream
+        } else ctx?.contentResolver?.openInputStream(android.net.Uri.parse(uri))
+        return stream?.use { android.graphics.BitmapFactory.decodeStream(it) }
+    }
 
     private val sessionsListener = MediaSessionManager.OnActiveSessionsChangedListener { setControllers(it.orEmpty()) }
 
@@ -168,12 +216,7 @@ object MediaHub {
         val title = md?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE) ?: md?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: ""
         val artist = md?.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: md?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
             ?: md?.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST) ?: ""
-        val bmp = md?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: md?.getBitmap(MediaMetadata.METADATA_KEY_ART)
-            ?: md?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
-        if (bmp !== artSource) {
-            artSource = bmp
-            art = bmp?.let { runCatching { shrink(it).asImageBitmap() }.getOrNull() }
-        }
+        cover(c, md, title)
         if (Prefs.lastMediaPkg != c.packageName) Prefs.lastMediaPkg = c.packageName
         if (title.isNotEmpty() && Prefs.lastMediaTitle != title) Prefs.lastMediaTitle = title
         now.value = Now(
@@ -342,7 +385,7 @@ fun MediaBlock(modifier: Modifier, slot: Slot, act: MainActivity) {
             ) {
                 val a = n.art
                 if (a != null) Image(a, "Okładka", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                else Icon(Icons.Outlined.MusicNote, null, tint = Dim, modifier = Modifier.size(d(56)))
+                else SoundBars(n.playing && n.live, Modifier.fillMaxSize().padding(d(22)))
             }
         }
         when {
@@ -377,5 +420,90 @@ fun MediaBlock(modifier: Modifier, slot: Slot, act: MainActivity) {
 private fun MediaButton(icon: ImageVector, desc: String, modifier: Modifier, main: Boolean, onClick: () -> Unit) {
     Box(modifier.kokpitSurface(d(16), active = main).combinedClickable(onClick = onClick), contentAlignment = Alignment.Center) {
         Icon(icon, desc, tint = if (main) LocalTheme.current.activeText else Txt, modifier = Modifier.size(d(36)))
+    }
+}
+
+
+/**
+ * Słupki w rytm muzyki – zamiast okładki, gdy odtwarzacz jej nie podaje.
+ * Prawdziwy dźwięk bierze z systemowego Visualizer (to, co radio właśnie gra; wymaga zgody na mikrofon,
+ * tej samej co hasło głosowe). Gdy system go nie daje albo podaje ciszę, słupki poruszają się same.
+ * Działa tylko, gdy coś gra i blok jest widoczny.
+ */
+@Composable
+private fun SoundBars(playing: Boolean, modifier: Modifier) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val count = 18
+    val levels = remember { FloatArray(count) { 0.06f } }
+    val frame = remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    DisposableEffect(playing) {
+        val main = Handler(Looper.getMainLooper())
+        var vis: android.media.audiofx.Visualizer? = null
+        var silentSince = 0L
+        var t = 0f
+        fun fake() {
+            t += 0.09f
+            for (i in 0 until count) {
+                val v = 0.2f + 0.6f * kotlin.math.abs(kotlin.math.sin(t * (0.9f + i % 5 * 0.23f) + i * 1.7f)) * (0.55f + 0.45f * kotlin.math.sin(t * 0.6f + i * 0.4f))
+                levels[i] = maxOf(v, levels[i] * 0.8f)
+            }
+        }
+        var ticking = true
+        val ticker = object : Runnable {
+            override fun run() {
+                if (!ticking) return
+                if (!playing) for (i in 0 until count) levels[i] = maxOf(0.06f, levels[i] * 0.8f)
+                else if (vis == null || (silentSince != 0L && SystemClock.elapsedRealtime() - silentSince > 1500)) fake()
+                frame.intValue++
+                main.postDelayed(this, 80)
+            }
+        }
+        if (playing && ctx.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            vis = runCatching {
+                android.media.audiofx.Visualizer(0).apply {
+                    captureSize = 256.coerceIn(android.media.audiofx.Visualizer.getCaptureSizeRange()[0], android.media.audiofx.Visualizer.getCaptureSizeRange()[1])
+                    setDataCaptureListener(object : android.media.audiofx.Visualizer.OnDataCaptureListener {
+                        override fun onWaveFormDataCapture(v: android.media.audiofx.Visualizer?, d: ByteArray?, rate: Int) {}
+                        override fun onFftDataCapture(v: android.media.audiofx.Visualizer?, fft: ByteArray?, rate: Int) {
+                            fft ?: return
+                            val bins = fft.size / 2 - 1
+                            var energy = 0f
+                            for (i in 0 until count) {
+                                // słupki rozłożone gęściej w basie (skala logarytmiczna), do ok. 2/3 pasma
+                                val a = Math.pow(bins * 0.66, i / count.toDouble()).toInt().coerceIn(1, bins)
+                                val b = Math.pow(bins * 0.66, (i + 1) / count.toDouble()).toInt().coerceIn(a, bins)
+                                var m = 0f
+                                for (k in a..b) m = maxOf(m, kotlin.math.hypot(fft[2 * k].toFloat(), fft[2 * k + 1].toFloat()))
+                                energy += m
+                                val lv = (kotlin.math.ln(1f + m) / kotlin.math.ln(128f)).coerceIn(0.06f, 1f)
+                                levels[i] = maxOf(lv, levels[i] * 0.82f)
+                            }
+                            silentSince = if (energy > 1f) 0L else if (silentSince == 0L) SystemClock.elapsedRealtime() else silentSince
+                        }
+                    }, minOf(android.media.audiofx.Visualizer.getMaxCaptureRate(), 12000), false, true)
+                    enabled = true
+                }
+            }.getOrNull()
+        }
+        main.post(ticker)
+        onDispose {
+            ticking = false
+            main.removeCallbacks(ticker)
+            runCatching { vis?.enabled = false; vis?.release() }
+        }
+    }
+    val top = Accent
+    androidx.compose.foundation.Canvas(modifier) {
+        frame.intValue // przerysuj przy każdej nowej klatce
+        val gap = size.width / count * 0.32f
+        val bw = size.width / count - gap
+        val brush = androidx.compose.ui.graphics.Brush.verticalGradient(listOf(top, top.copy(alpha = 0.35f)))
+        for (i in 0 until count) {
+            val h = size.height * levels[i]
+            drawRoundRect(
+                brush, topLeft = androidx.compose.ui.geometry.Offset(i * (bw + gap) + gap / 2, size.height - h),
+                size = androidx.compose.ui.geometry.Size(bw, h), cornerRadius = androidx.compose.ui.geometry.CornerRadius(bw / 3),
+            )
+        }
     }
 }
