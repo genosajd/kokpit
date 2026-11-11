@@ -54,11 +54,26 @@ data class KokpitTheme(
     val aurora: Pair<Color, Color> = Color(0x524DA3FF) to Color(0x2E785AFF),
     /** światło przesuwające się po górnej krawędzi bloków */
     val sweep: Color = Color(0xE6A0D2FF),
-)
+    /** ścięte rogi bloków i przycisków (prawy górny, lewy dolny) zamiast zaokrąglonych */
+    val cut: Boolean = false,
+    /** dwie ukośne płaszczyzny światła w tle ekranu (rysowane raz, bez ruchu); null = bez */
+    val planes: Pair<Color, Color>? = null,
+) {
+    /** Kształt bloku, okna albo przycisku o promieniu [r] w tym wyglądzie. */
+    fun shape(r: androidx.compose.ui.unit.Dp): androidx.compose.ui.graphics.Shape =
+        if (cut) androidx.compose.foundation.shape.CutCornerShape(topStart = 0f, topEnd = 0f, bottomEnd = 0f, bottomStart = 0f)
+            .copy(topEnd = androidx.compose.foundation.shape.CornerSize(r * 0.8f), bottomStart = androidx.compose.foundation.shape.CornerSize(r * 0.8f))
+        else androidx.compose.foundation.shape.RoundedCornerShape(r)
+}
 
 private fun v(vararg c: Long) = Brush.verticalGradient(c.map { Color(it) })
 private fun h(vararg c: Long) = Brush.horizontalGradient(c.map { Color(it) })
 private fun solid(c: Long) = SolidColor(Color(c))
+/** gradient ukośny: od lewego górnego do prawego dolnego rogu */
+private fun diag(vararg c: Pair<Float, Long>) = Brush.linearGradient(
+    *c.map { it.first to Color(it.second) }.toTypedArray(),
+    start = androidx.compose.ui.geometry.Offset.Zero, end = androidx.compose.ui.geometry.Offset.Infinite,
+)
 
 object Themes {
     /** Pierwszy wygląd 0.3.x: płaskie, ciemne kolory. */
@@ -121,8 +136,30 @@ object Themes {
         sweep = Color(0xE6FF8C96),
     )
 
+    /** Jak w nowych BMW: ukośne płaszczyzny światła, ścięte rogi, przejścia niebieski → fiolet. Bez ruchu – lekki dla radia. */
+    val IDRIVE8 = KokpitTheme(
+        id = "idrive8",
+        name = "iDrive 8",
+        description = "Ścięte rogi, ukośne światło w tle, niebiesko-fioletowe przejścia; bez animacji",
+        screen = v(0xFF080A16, 0xFF05060D, 0xFF070A1C),
+        block = diag(0f to 0xFF1D2650, 0.45f to 0xFF11162F, 1f to 0xFF090B18),
+        blockEdge = diag(0f to 0xCC96AFFF, 0.35f to 0x2E7864FF, 0.7f to 0x0DFFFFFF, 1f to 0x80785AFF),
+        surface = v(0x29FFFFFF, 0x0FFFFFFF),
+        surfaceEdge = v(0x33FFFFFF, 0x00FFFFFF, 0x00FFFFFF),
+        selected = diag(0f to 0x663D7BFF, 1f to 0x4D8A5CFF),
+        selectedRing = Color(0xFFA9BCFF),
+        active = h(0xFF3D7BFF, 0xFF8A5CFF),
+        activeText = Color.White,
+        carBack = v(0x00000000, 0x00000000, 0x4D3C6EFF),
+        fuel = h(0xFF3D7BFF, 0xFF9A5CFF, 0xFFE08CFF),
+        speed = v(0xFFFFFFFF, 0xFFFFFFFF, 0xFF8FB0FF),
+        glow = Color(0x4D3C6EFF),
+        cut = true,
+        planes = Color(0x29466EFF) to Color(0x269650FF),
+    )
+
     /** Wszystkie wyglądy do wyboru, w tej kolejności w Ustawieniach. */
-    val all = listOf(FLAT, BMW_IDRIVE, M_SPORT)
+    val all = listOf(FLAT, BMW_IDRIVE, M_SPORT, IDRIVE8)
 
     fun byId(id: String?) = all.firstOrNull { it.id == id }
         ?: if (id == "anim") BMW_IDRIVE else FLAT // "anim" = dawny „Animowany” (0.3.5)

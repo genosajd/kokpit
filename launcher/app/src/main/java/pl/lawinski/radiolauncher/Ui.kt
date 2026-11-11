@@ -90,6 +90,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -230,6 +231,22 @@ fun LauncherScreen(act: MainActivity) {
       ) {
         BoxWithConstraints(
             Modifier.fillMaxSize().background(theme.screen)
+                .drawBehind {
+                    // ukośne płaszczyzny światła (wygląd iDrive 8): dwa pasy pochylone w prawo, gasnące ku prawej
+                    val (c1, c2) = theme.planes ?: return@drawBehind
+                    val w = size.width; val hgt = size.height
+                    val lean = hgt * 0.5f
+                    val scope = this
+                    fun plane(from: Float, to: Float, c: Color) {
+                        val x0 = w * from; val x1 = w * to
+                        val p = androidx.compose.ui.graphics.Path().apply {
+                            moveTo(x0 + lean, 0f); lineTo(x1 + lean, 0f); lineTo(x1 - lean, hgt); lineTo(x0 - lean, hgt); close()
+                        }
+                        scope.drawPath(p, Brush.horizontalGradient(listOf(c, Color.Transparent), startX = x0 - lean, endX = x1 + lean))
+                    }
+                    plane(0.30f, 0.47f, c1)
+                    plane(0.60f, 0.74f, c2)
+                }
                 .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.displayCutout))
         ) {
             val u = minOf(maxWidth / 2560f, maxHeight / 720f)
@@ -359,9 +376,9 @@ fun Block(modifier: Modifier, content: @Composable () -> Unit) {
     Box(
         modifier
             .graphicsLayer { translationY = (1f - appear.value) * 40f; alpha = 0.35f + 0.65f * appear.value }
-            .clip(RoundedCornerShape(d(28)))
+            .clip(LocalTheme.current.shape(d(28)))
             .background(LocalTheme.current.block)
-            .border(1.dp, LocalTheme.current.blockEdge, RoundedCornerShape(d(28)))
+            .border(1.dp, LocalTheme.current.blockEdge, LocalTheme.current.shape(d(28)))
     ) {
         content()
         if (animate) BlockSweep()
@@ -390,7 +407,7 @@ private val OK_KEYS = setOf(Key.Enter, Key.NumPadEnter, Key.DirectionCenter)
 fun Modifier.kokpitSurface(radius: Dp, fill: Boolean = true, active: Boolean = false): Modifier = composed {
     val t = LocalTheme.current
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(radius)
+    val shape = t.shape(radius)
     val ring = d(3)
     val pulse = if (focused && LocalAnimate.current) loop(1600) else null
     // naciśnięcie: element się wciska i rozjaśnia, żeby było widać, że dotyk zadziałał
