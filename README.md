@@ -7,7 +7,7 @@ Kotlin + Jetpack Compose, ekran 2560x720.
 
 - Bloki na siatce 8x2, które można przestawiać, powiększać i chować: skróty aplikacji, auto, nawigacja, kamera, pogoda i dowolne widżety Androida (bloków „Widżet” może być kilka, widżet zmienia się przyciskiem „Zmień” w edycji układu).
 - Skróty przestawia się przytrzymaniem i przeciągnięciem; obsługa pokrętłem iDrive z wyraźnym zaznaczeniem.
-- Wygląd do wyboru w Ustawieniach: Płaski, animowane BMW iDrive (niebieski) i M Sport (czerwony) oraz iDrive 8 (ścięte rogi, ukośne światło w tle, bez animacji), tryb ciemny albo jasny; każdy wygląd można dostosować (kolor poświaty, tła i akcentu, krój i rozmiar pisma). Nowy wygląd to jeden wpis w `Themes.kt`.
+- Wygląd do wyboru w Ustawieniach: Płaski, animowane BMW iDrive (niebieski), M Sport (czerwony) i iDrive 8 (ścięte rogi, ukośne światło w tle, niebiesko-fioletowy), tryb ciemny albo jasny; każdy wygląd można dostosować (kolor poświaty, tła i akcentu, krój i rozmiar pisma). Nowy wygląd to jeden wpis w `Themes.kt`.
 - **Dane z auta przez moduł CAN radia:** paliwo w litrach, otwarte drzwi i klapa (widok z góry), bieg, ostrzeżenie o niezapiętym pasie (domyślnie wyłączone), temperatura zewnętrzna, prędkość (awaryjnie z GPS).
 - Zdjęcie białego F11 w bloku auta (przy otwartych drzwiach widok z góry).
 - Trasa z powiadomień Map Google i Waze; przyciski Dom i Praca otwierają miejsca zapisane w Mapach, plus trzecie miejsce z własną nazwą (np. etykieta z Map).

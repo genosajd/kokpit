@@ -136,11 +136,11 @@ object Themes {
         sweep = Color(0xE6FF8C96),
     )
 
-    /** Jak w nowych BMW: ukośne płaszczyzny światła, ścięte rogi, przejścia niebieski → fiolet. Bez ruchu – lekki dla radia. */
+    /** Jak w nowych BMW: ukośne płaszczyzny światła, ścięte rogi, przejścia niebieski → fiolet, w ruchu. */
     val IDRIVE8 = KokpitTheme(
         id = "idrive8",
         name = "iDrive 8",
-        description = "Ścięte rogi, ukośne światło w tle, niebiesko-fioletowe przejścia; bez animacji",
+        description = "Ścięte rogi, ukośne światło w tle, niebiesko-fioletowe przejścia w ruchu",
         screen = v(0xFF080A16, 0xFF05060D, 0xFF070A1C),
         block = diag(0f to 0xFF1D2650, 0.45f to 0xFF11162F, 1f to 0xFF090B18),
         blockEdge = diag(0f to 0xCC96AFFF, 0.35f to 0x2E7864FF, 0.7f to 0x0DFFFFFF, 1f to 0x80785AFF),
@@ -154,6 +154,9 @@ object Themes {
         fuel = h(0xFF3D7BFF, 0xFF9A5CFF, 0xFFE08CFF),
         speed = v(0xFFFFFFFF, 0xFFFFFFFF, 0xFF8FB0FF),
         glow = Color(0x4D3C6EFF),
+        animated = true,
+        aurora = Color(0x4D3D7BFF) to Color(0x389650FF),
+        sweep = Color(0xE6B4C4FF),
         cut = true,
         planes = Color(0x29466EFF) to Color(0x269650FF),
     )
