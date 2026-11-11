@@ -108,8 +108,18 @@ object SysStatusReader {
             val st = b.getIntExtra(BatteryManager.EXTRA_STATUS, 0)
             charging = st == BatteryManager.BATTERY_STATUS_CHARGING || st == BatteryManager.BATTERY_STATUS_FULL
         }
+        // radio Witstek: bateria Androida jest udawana, a napięcie akumulatora auta podaje MCU (143 = 14,3 V)
+        carBatteryVolt()?.let { return SysStatus(wifi, cell, type, online, null, it, false) }
         return SysStatus(wifi, cell, type, online, pct, volt, charging)
     }
+}
+
+/** Napięcie akumulatora auta z właściwości systemowej Witstek „wits.battery.vol” (dziesiąte części V). */
+fun carBatteryVolt(): Float? {
+    val raw = runCatching {
+        Class.forName("android.os.SystemProperties").getMethod("get", String::class.java).invoke(null, "wits.battery.vol") as String
+    }.getOrNull()?.takeIf { it.isNotBlank() } ?: return null
+    return raw.toIntOrNull()?.takeIf { it in 50..200 }?.div(10f)
 }
 
 /** Ikonki zasięgu i akumulatora do górnego paska. */

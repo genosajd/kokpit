@@ -334,6 +334,12 @@ fun LauncherScreen(act: MainActivity) {
     }
 }
 
+/** Radio Witstek (YA32): jego pasek stanu nie daje się ukryć i zasłania górę ekranu. */
+val isWitstek: Boolean by lazy {
+    runCatching { Class.forName("android.os.SystemProperties").getMethod("get", String::class.java).invoke(null, "ro.wits.machine.id") as String }
+        .getOrNull().orEmpty().isNotBlank()
+}
+
 @Composable
 fun Block(modifier: Modifier, content: @Composable () -> Unit) {
     val animate = LocalAnimate.current
@@ -547,9 +553,9 @@ fun ShortcutsBlock(
     val ctx = LocalContext.current
     val density = LocalDensity.current
     val haptic = LocalHapticFeedback.current
-    // niski klocek: jeden rząd szerszych ikon; wysoki: trzy rzędy, półtorej kolumny ikon na komórkę siatki
+    // niski klocek: jeden rząd ikon; wysoki: trzy rzędy; zawsze dwie kolumny ikon na komórkę siatki
     val rows = if (slot.h == 1) 1 else 3
-    val cols = if (slot.h == 1) slot.w * 2 else (slot.w * 3 / 2).coerceAtLeast(1)
+    val cols = slot.w * 2
     val perPage = rows * cols
     val pages = (shortcuts + ADD_TILE).chunked(perPage)
     val pager = rememberPagerState { pages.size }

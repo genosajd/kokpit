@@ -378,6 +378,17 @@ private object AssistantTools {
         fun volPct() = am.getStreamVolume(stream) * 100 / max
         fun ui(block: () -> Unit) = act.runOnUiThread(block)
         val flags = android.media.AudioManager.FLAG_SHOW_UI
+        // radio Witstek: słyszalna głośność to wzmacniacz MCU (0–40), Android stoi na maksimum
+        val car = CarVolume.mcu(act)
+        if (car != null && action in setOf("volume_set", "volume_up", "volume_down")) {
+            val target = when (action) {
+                "volume_set" -> (value.coerceIn(0, 100) * CarVolume.MAX + 50) / 100
+                "volume_up" -> car + 4
+                else -> car - 4
+            }.coerceIn(0, CarVolume.MAX)
+            CarVolume.set(act, car, target)
+            return "Głośność radia $target z ${CarVolume.MAX} (${target * 100 / CarVolume.MAX} %)"
+        }
         return when (action) {
             "volume_set" -> { am.setStreamVolume(stream, (value.coerceIn(0, 100) * max + 50) / 100, flags); "Głośność ${volPct()} %" }
             "volume_up" -> { am.adjustStreamVolume(stream, android.media.AudioManager.ADJUST_RAISE, flags); am.adjustStreamVolume(stream, android.media.AudioManager.ADJUST_RAISE, flags); "Głośność ${volPct()} %" }

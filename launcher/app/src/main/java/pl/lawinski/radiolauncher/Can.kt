@@ -25,7 +25,9 @@ import android.util.Log
  * - `data[3]`: bieg 0=P 1=R 2=N 4=D 5=S 6=M;
  * - `data[8]` bity 7..6 == 1: niezapięty pas;
  * - `data[9]`: temperatura zewnętrzna × 2 (bit 7 = minus); np. 0x0D = 6,5 °C.
- * Prędkość auta usługa radia wystawia we właściwości systemowej `can.speed` (km/h).
+ * Prędkość auta usługa radia wystawia we właściwości systemowej `can.speed` (km/h), a bajt drzwi w `can.door`
+ * – te dwie rzeczy działają bez dzienników (Prefs.canLogs wyłączone = bez okienka zgody Androida 13,
+ * ale też bez paliwa na żywo, biegu, temperatury, telefonu → iDrive i przechyłów pokrętła).
  * Układ odczytany z launchera Witstek (com.middle.GlobalDef). Launcher Witstek zapisuje też
  * ostatnie paliwo w Settings.System „OIlValue”, więc to jest wartość startowa.
  */
@@ -95,6 +97,45 @@ object CanSource {
         if (v in 1..127) publish(last.copy(fuelL = v.toFloat()))
     }
 
+    /**
+     * Przycisk telefonu: przy rozmowie BMW wysyła przez CAN klawisz telefonu (ramka MCU `02 22 12 …`,
+     * w CenterService doKey=0x2c), na który radio otwierało okienko telefonu Witstek (wyłączone przez
+     * `pm disable com.wits.bt/com.wits.bt.StartActivity`). Kokpit otwiera wtedy ekran iDrive, gdzie jest telefon BMW.
+     */
+    private fun isPhoneKey(b: ByteArray) = b.size >= 4 && b[0].toInt() == 0x02 && b[1].toInt() == 0x22 && b[2].toInt() == 0x12 && b[3].toInt() == 0x00
+
+    private var lastPhoneKey = 0L
+
+    private fun phoneKey(ctx: Context) {
+        val now = System.currentTimeMillis()
+        if (now - lastPhoneKey < 3000) return
+        lastPhoneKey = now
+        Log.i("CanSource", "telefon BMW – ekran iDrive")
+        if (Prefs.phoneToIdrive) openCarScreen(ctx)
+    }
+
+    /**
+     * Przechył pokrętła iDrive w górę / w dół: ramki MCU `02 22 21 01` / `02 22 22 01` (bez puszczenia),
+     * których CenterService nie zamienia na klawisz Androida (lewo/prawo `23`/`24` – tak, jako strzałki).
+     * Kokpit robi z nich strzałki góra/dół we własnym oknie – przesuwają zaznaczenie między blokami.
+     */
+    private fun tiltKey(b: ByteArray): Int? {
+        if (b.size < 4 || b[0].toInt() != 0x02 || b[1].toInt() != 0x22 || b[3].toInt() != 0x01) return null
+        return when (b[2].toInt()) {
+            0x21 -> android.view.KeyEvent.KEYCODE_DPAD_UP
+            0x22 -> android.view.KeyEvent.KEYCODE_DPAD_DOWN
+            else -> null
+        }
+    }
+
+    private fun tilt(code: Int) {
+        val act = MainActivity.live ?: return
+        // tylko gdy Kokpit jest na ekranie (nie przy okienku asystenta ani innej aplikacji)
+        if (!act.visible.value || !act.hasWindowFocus()) return
+        act.dispatchKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, code))
+        act.dispatchKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, code))
+    }
+
     private val getProp: java.lang.reflect.Method? = try {
         Class.forName("android.os.SystemProperties").getMethod("get", String::class.java)
     } catch (_: Exception) {
@@ -108,6 +149,37 @@ object CanSource {
         null
     }
 
+    /**
+     * Drzwi bez dzienników: CenterService zapisuje bajt drzwi (szesnastkowo, strony już zamienione wg DRIVINGS_SEAT)
+     * we właściwości `can.door`. Używane, gdy odczyt dzienników jest wyłączony albo jeszcze bez zgody.
+     */
+    private fun doorsFromProp(): Set<Door>? {
+        val v = try {
+            (getProp?.invoke(null, "can.door") as? String)?.trim()?.takeIf { it.isNotEmpty() }?.toInt(16)
+        } catch (_: Exception) {
+            null
+        } ?: return null
+        return buildSet {
+            if (v and 0x80 != 0) add(Door.FL)
+            if (v and 0x40 != 0) add(Door.FR)
+            if (v and 0x20 != 0) add(Door.RL)
+            if (v and 0x10 != 0) add(Door.RR)
+            if (v and 0x08 != 0) add(Door.TRUNK)
+        }
+    }
+
+    /** proces logcat czytający ramki; null = dzienniki nie są czytane */
+    @Volatile
+    private var logProc: Process? = null
+    /** kiedy ostatnio przyszła ramka z dziennika – wtedy drzwi bierzemy z ramek, nie z właściwości */
+    @Volatile
+    private var lastFrameAt = 0L
+
+    /** Włączenie/wyłączenie odczytu dzienników w Ustawieniach (wyłączenie kończy logcat od razu). */
+    fun logsChanged() {
+        if (!Prefs.canLogs) runCatching { logProc?.destroy() }
+    }
+
     private val FRAME = Regex("doMcuData[A-Za-z0-9]*:\\s*((?:[0-9a-fA-F]{2}\\s*)+)$")
 
     /** Czyta ramki z logu CenterService; po zakończeniu procesu logcat próbuje ponownie. */
@@ -119,14 +191,23 @@ object CanSource {
         val main = Handler(Looper.getMainLooper())
         Thread({
             while (true) {
+                if (!Prefs.canLogs) { Thread.sleep(3000); continue }
                 try {
-                    val p = ProcessBuilder("logcat", "-v", "raw", "-T", "500", "-s", "McuManager:D").redirectErrorStream(true).start()
+                    val since = System.currentTimeMillis()
+                    val p = ProcessBuilder("logcat", "-v", "epoch", "-T", "500", "-s", "McuManager:D").redirectErrorStream(true).start()
+                    logProc = p
                     p.inputStream.bufferedReader().forEachLine { line ->
                         val hex = FRAME.find(line.trim())?.groupValues?.get(1) ?: return@forEachLine
                         val bytes = hex.trim().split(Regex("\\s+")).map { it.toInt(16).toByte() }.toByteArray()
+                        lastFrameAt = System.currentTimeMillis()
                         if (bytes.size > 1 && bytes[1].toInt() == FRAME_CAR) main.post { parse(ctx, bytes) }
+                        // przycisk telefonu z BMW (rozmowa) – tylko świeże ramki, nie zaległe z logu
+                        val at = line.trim().substringBefore(' ').toDoubleOrNull()?.times(1000)?.toLong() ?: 0L
+                        if (isPhoneKey(bytes) && at >= since - 2000) main.post { phoneKey(ctx) }
+                        if (at >= since - 2000) tiltKey(bytes)?.let { code -> main.post { tilt(code) } }
                     }
                     p.waitFor()
+                    logProc = null
                 } catch (e: Exception) {
                     Log.w("CanSource", "logcat: $e")
                 }
@@ -141,6 +222,17 @@ object CanSource {
         val ctx = context.applicationContext
         readFuelSetting(ctx)
         startLogReader(ctx)
+        // drzwi z właściwości systemu co 1 s – tylko gdy nie ma ramek z dziennika (wyłączone / brak zgody)
+        val h = Handler(Looper.getMainLooper())
+        h.post(object : Runnable {
+            override fun run() {
+                if (logProc == null || lastFrameAt == 0L) {
+                    val doors = doorsFromProp()
+                    if (doors != null && doors != last.open) publish(last.copy(open = doors))
+                }
+                h.postDelayed(this, 1000)
+            }
+        })
         try {
             ctx.contentResolver.registerContentObserver(
                 Settings.System.getUriFor(KEY_FUEL), false,

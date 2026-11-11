@@ -6,6 +6,7 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.StartOffset
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.runtime.State
+import kotlinx.coroutines.launch
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -40,18 +41,46 @@ import androidx.compose.ui.unit.dp
 /** true: animacje włączone (wygląd animowany, Kokpit widoczny, bez edycji układu). */
 val LocalAnimate = compositionLocalOf { false }
 
-/** Wartość 0..1 w pętli: tam i z powrotem (reverse) albo od nowa. */
+/**
+ * Odstęp klatek animacji wyglądu (ok. 20 kl./s). Animacje są powolne, a pełne 60 kl./s
+ * w radiu zajmowało ok. 70% rdzenia samym składaniem warstw (RenderThread).
+ */
+private const val FRAME_MS = 80L
+
+/** Wspólny zegar animacji (ms): jeden licznik dla wszystkich, żeby klatki się pokrywały. */
+private object AnimClock {
+    val now = androidx.compose.runtime.mutableLongStateOf(0L)
+    var users = 0
+    var job: kotlinx.coroutines.Job? = null
+}
+
+/** Wartość 0..1 w pętli: tam i z powrotem (reverse) albo od nowa; odświeżana co [FRAME_MS] (wspólny zegar). */
 @Composable
-fun loop(durationMs: Int, reverse: Boolean = true, delayMs: Int = 0): State<Float> =
-    rememberInfiniteTransition(label = "loop").animateFloat(
-        0f, 1f,
-        infiniteRepeatable(
-            tween(durationMs, easing = if (reverse) FastOutSlowInEasing else LinearEasing),
-            if (reverse) RepeatMode.Reverse else RepeatMode.Restart,
-            initialStartOffset = StartOffset(delayMs),
-        ),
-        label = "loop",
-    )
+fun loop(durationMs: Int, reverse: Boolean = true, delayMs: Int = 0): State<Float> {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        if (AnimClock.users++ == 0) AnimClock.job = scope.launch(kotlinx.coroutines.Dispatchers.Main) {
+            while (true) {
+                AnimClock.now.longValue = System.nanoTime() / 1_000_000
+                kotlinx.coroutines.delay(FRAME_MS)
+            }
+        }
+        onDispose {
+            if (--AnimClock.users == 0) { AnimClock.job?.cancel(); AnimClock.job = null }
+        }
+    }
+    val start = remember { System.nanoTime() / 1_000_000 + delayMs }
+    return remember(durationMs, reverse) {
+        androidx.compose.runtime.derivedStateOf {
+            val t = (AnimClock.now.longValue - start).coerceAtLeast(0)
+            if (reverse) {
+                // tam i z powrotem z łagodnym początkiem i końcem
+                val cycle = (t % (2L * durationMs)).toFloat() / durationMs
+                FastOutSlowInEasing.transform(if (cycle <= 1f) cycle else 2f - cycle)
+            } else (t % durationMs).toFloat() / durationMs
+        }
+    }
+}
 
 /** Dwie wolno płynące poświaty za blokami. */
 @Composable

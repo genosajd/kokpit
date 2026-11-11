@@ -49,23 +49,62 @@ import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.delay
 
 /*
- * Głośność Androida (strumień muzyki) w górnym pasku: ikonka z liczbą jak w panelu radia,
- * dotknięcie otwiera suwak z przyciskami −/+. Zmiany z kierownicy/pokrętła widać od razu
- * (rozgłoszenie VOLUME_CHANGED_ACTION, awaryjnie odczyt co 3 s).
+ * Głośność w górnym pasku: ikonka z liczbą jak w panelu radia, dotknięcie otwiera suwak z przyciskami −/+.
+ * W radiu Witstek słyszalną głośność ustawia wzmacniacz przez moduł MCU (0–40, ustawienie
+ * „w19_mcu:040400”), a głośność Androida stoi na maksimum – dlatego sterujemy MCU: CenterService
+ * przyjmuje rozgłoszenie com.can.ACTION_KEY_CODE z key_code 13 (głośniej) / 12 (ciszej), tak jak
+ * przyciski radia. Poza radiem (emulator) – zwykła głośność muzyki Androida.
  */
 private const val STREAM = AudioManager.STREAM_MUSIC
+
+object CarVolume {
+    const val KEY = "w19_mcu:040400"
+    const val MAX = 40
+
+    /** Głośność wzmacniacza radia albo null, gdy to nie radio Witstek. */
+    fun mcu(ctx: Context): Int? {
+        val direct = runCatching { android.provider.Settings.System.getString(ctx.contentResolver, KEY)?.toIntOrNull() }
+        direct.getOrNull()?.let { return it }
+        // Android 12+ może nie wpuścić odczytu niestandardowego klucza – próba przez zapytanie do tabeli
+        val q = runCatching {
+            ctx.contentResolver.query(android.provider.Settings.System.CONTENT_URI, arrayOf("name", "value"), "name=?", arrayOf(KEY), null)?.use { c ->
+                if (c.moveToFirst()) c.getString(1)?.toIntOrNull() else null
+            }
+        }
+        android.util.Log.i("KokpitVolume", "odczyt $KEY: ${direct.exceptionOrNull()?.message ?: "null"} / zapytanie: ${q.getOrNull() ?: q.exceptionOrNull()?.message}")
+        return q.getOrNull()
+    }
+
+    /** Jeden stopień w górę albo w dół (jak przycisk na radiu). */
+    fun step(ctx: Context, up: Boolean) {
+        ctx.sendBroadcast(Intent("com.can.ACTION_KEY_CODE").putExtra("key_code", if (up) 13 else 12))
+    }
+
+    /** Ustawia [target] (0–40) wysyłając odpowiednią liczbę kroków od [from]. */
+    fun set(ctx: Context, from: Int, target: Int) {
+        val t = target.coerceIn(0, MAX)
+        repeat(kotlin.math.abs(t - from)) { step(ctx, t > from) }
+    }
+}
 
 @Composable
 fun VolumeControl() {
     val ctx = LocalContext.current
     val am = remember { ctx.getSystemService(AudioManager::class.java) }
-    val max = remember { runCatching { am.getStreamMaxVolume(STREAM) }.getOrDefault(15).coerceAtLeast(1) }
-    var vol by remember { mutableIntStateOf(runCatching { am.getStreamVolume(STREAM) }.getOrDefault(0)) }
-    var muted by remember { mutableStateOf(runCatching { am.isStreamMute(STREAM) }.getOrDefault(false)) }
+    // radio Witstek: wzmacniacz przez MCU; inaczej głośność Androida
+    val mcu = remember { CarVolume.mcu(ctx) != null }
+    val max = remember { if (mcu) CarVolume.MAX else runCatching { am.getStreamMaxVolume(STREAM) }.getOrDefault(15).coerceAtLeast(1) }
+    fun current() = if (mcu) CarVolume.mcu(ctx) ?: 0 else runCatching { am.getStreamVolume(STREAM) }.getOrDefault(0)
+    var vol by remember { mutableIntStateOf(current()) }
+    var muted by remember { mutableStateOf(!mcu && runCatching { am.isStreamMute(STREAM) }.getOrDefault(false)) }
     var open by remember { mutableStateOf(false) }
+    // ostatnio zamówiona głośność MCU (kroki idą asynchronicznie – liczymy od niej, nie od odczytu)
+    var requested by remember { mutableIntStateOf(vol) }
+    var requestedAt by remember { mutableStateOf(0L) }
     fun read() {
-        vol = runCatching { am.getStreamVolume(STREAM) }.getOrDefault(vol)
-        muted = runCatching { am.isStreamMute(STREAM) }.getOrDefault(false)
+        vol = current()
+        if (System.currentTimeMillis() - requestedAt > 1500) requested = vol
+        muted = !mcu && runCatching { am.isStreamMute(STREAM) }.getOrDefault(false)
     }
     DisposableEffect(Unit) {
         val r = object : BroadcastReceiver() {
@@ -73,13 +112,28 @@ fun VolumeControl() {
         }
         val f = IntentFilter("android.media.VOLUME_CHANGED_ACTION").apply { addAction("android.media.STREAM_MUTE_CHANGED_ACTION") }
         runCatching { ctx.registerReceiver(r, f, Context.RECEIVER_EXPORTED) }
-        onDispose { runCatching { ctx.unregisterReceiver(r) } }
+        val obs = object : android.database.ContentObserver(android.os.Handler(android.os.Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) = read()
+        }
+        if (mcu) runCatching { ctx.contentResolver.registerContentObserver(android.provider.Settings.System.getUriFor(CarVolume.KEY), false, obs) }
+        onDispose {
+            runCatching { ctx.unregisterReceiver(r) }
+            runCatching { ctx.contentResolver.unregisterContentObserver(obs) }
+        }
     }
     LaunchedEffect(Unit) {
         while (true) { delay(3000); read() }
     }
     fun set(v: Int) {
         val n = v.coerceIn(0, max)
+        if (mcu) {
+            if (n == requested) return
+            CarVolume.set(ctx, requested, n)
+            requested = n
+            requestedAt = System.currentTimeMillis()
+            vol = n
+            return
+        }
         runCatching {
             if (muted && n > 0) am.adjustStreamVolume(STREAM, AudioManager.ADJUST_UNMUTE, 0)
             am.setStreamVolume(STREAM, n, 0)
@@ -119,7 +173,7 @@ fun VolumeControl() {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(d(14)),
                 ) {
-                    VolButton(if (muted) Icons.Rounded.VolumeUp else Icons.Rounded.VolumeOff) {
+                    if (!mcu) VolButton(if (muted) Icons.Rounded.VolumeUp else Icons.Rounded.VolumeOff) {
                         runCatching { am.adjustStreamVolume(STREAM, if (muted) AudioManager.ADJUST_UNMUTE else AudioManager.ADJUST_MUTE, 0) }
                         read()
                     }

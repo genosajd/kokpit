@@ -110,6 +110,26 @@ object Prefs {
         get() = sp.getString("slack_token", "") ?: ""
         set(v) = sp.edit().putString("slack_token", v).apply()
 
+    /** w czasie nawigacji ukrywaj wyskakujące z góry komunikaty (NavPopups) */
+    var hideNavPopups: Boolean
+        get() = sp.getBoolean("hide_nav_popups", true)
+        set(v) = sp.edit().putBoolean("hide_nav_popups", v).apply()
+
+    /** Kokpit wyłączył w systemie wyskakujące powiadomienia i ma je przywrócić */
+    var navPopupsHidden: Boolean
+        get() = sp.getBoolean("nav_popups_hidden", false)
+        set(v) = sp.edit().putBoolean("nav_popups_hidden", v).apply()
+
+    /** czytanie ramek CAN z dzienników radia (Android 13 pyta o zgodę po każdym starcie Kokpitu) */
+    var canLogs: Boolean
+        get() = sp.getBoolean("can_logs", true)
+        set(v) = sp.edit().putBoolean("can_logs", v).apply()
+
+    /** rozmowa telefoniczna (przycisk telefonu z BMW) otwiera ekran iDrive */
+    var phoneToIdrive: Boolean
+        get() = sp.getBoolean("phone_to_idrive", true)
+        set(v) = sp.edit().putBoolean("phone_to_idrive", v).apply()
+
     /** dostępy asystenta wyłączone przez właściciela (id grup z Access.groups) */
     var aiDisabled: Set<String>
         get() = sp.getStringSet("ai_disabled", emptySet())?.toSet() ?: emptySet()
@@ -186,6 +206,21 @@ object Prefs {
     var hotwordSens: Int
         get() = sp.getInt("hotword_sens", 1)
         set(v) = sp.edit().putInt("hotword_sens", v).apply()
+
+    /** własne hasło zamiast „OK BMW” (kilka po przecinku); puste = domyślne */
+    var hotwordPhrase: String
+        get() = sp.getString("hotword_phrase", "") ?: ""
+        set(v) = sp.edit().putString("hotword_phrase", v).apply()
+
+    /** tryb mikrofonu dla „OK BMW” (Hotword.MIC_MODES) */
+    var micMode: Int
+        get() = sp.getInt("mic_mode", 0)
+        set(v) = sp.edit().putInt("mic_mode", v).apply()
+
+    /** automatyczne wzmocnienie cichego mikrofonu dla „OK BMW” */
+    var micGain: Boolean
+        get() = sp.getBoolean("mic_gain", true)
+        set(v) = sp.edit().putBoolean("mic_gain", v).apply()
 
     /** rozmowa z asystentem zaczyna się od nowa po przekroczeniu tylu tokenów */
     var aiTokenLimit: Int

@@ -35,6 +35,8 @@ class NavListener : NotificationListenerService() {
         val sub = ex.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString().orEmpty()
         if (title.isBlank() && text.isBlank()) return
         currentKey = sbn.key
+        NavPopups.channel = sbn.packageName to n.channelId
+        NavPopups.apply(this, true)
         NavState.info.value = NavInfo(sbn.packageName, title, text, sub, largeIcon(n), n.contentIntent)
     }
 
@@ -42,11 +44,13 @@ class NavListener : NotificationListenerService() {
         if (sbn.key == currentKey) {
             currentKey = null
             NavState.info.value = null
+            NavPopups.apply(this, false)
         }
     }
 
     override fun onListenerDisconnected() {
         NavState.info.value = null
+        NavPopups.apply(this, false)
     }
 
     private fun largeIcon(n: Notification): Bitmap? = try {
@@ -61,6 +65,62 @@ class NavListener : NotificationListenerService() {
 
         fun isEnabled(ctx: Context): Boolean =
             NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
+    }
+}
+
+/**
+ * Wyskakujące z góry komunikaty nawigacji (Mapy Google w tle pokazują każdy manewr jako okienko) – zbędne,
+ * bo manewry są w bloku „Nawigacja”. Dwie drogi:
+ * - automatycznie: na czas nawigacji Kokpit wyłącza w systemie wyskakujące powiadomienia
+ *   (`heads_up_notifications_enabled`), po niej włącza z powrotem. Wymaga zgody nadanej raz przez ADB:
+ *   `pm grant pl.lawinski.radiolauncher android.permission.WRITE_SECURE_SETTINGS`;
+ * - ręcznie: Kokpit otwiera ustawienia powiadomień Map, gdzie wyłącza się „Wyświetlaj na ekranie”.
+ */
+object NavPopups {
+    private const val KEY = "heads_up_notifications_enabled"
+
+    /** pakiet i kanał ostatniego powiadomienia nawigacji – do otwarcia jego ustawień */
+    @Volatile
+    var channel: Pair<String, String?>? = null
+
+    fun canAuto(ctx: Context) =
+        ctx.checkSelfPermission("android.permission.WRITE_SECURE_SETTINGS") == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    /** Ustawia system wg ustawienia Kokpitu i tego, czy trwa nawigacja. Przywraca tylko to, co sam wyłączył. */
+    fun apply(ctx: Context, navActive: Boolean) {
+        if (!canAuto(ctx)) return
+        Prefs.init(ctx)
+        val cr = ctx.contentResolver
+        try {
+            if (Prefs.hideNavPopups && navActive) {
+                if (android.provider.Settings.Global.getInt(cr, KEY, 1) != 0) {
+                    android.provider.Settings.Global.putInt(cr, KEY, 0)
+                    Prefs.navPopupsHidden = true
+                }
+            } else if (Prefs.navPopupsHidden) {
+                android.provider.Settings.Global.putInt(cr, KEY, 1)
+                Prefs.navPopupsHidden = false
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("NavPopups", "ustawienie: $e")
+        }
+    }
+
+    /** Ustawienia powiadomień Map (kanał nawigacji, jeśli znany) – tam „Wyświetlaj na ekranie”. */
+    fun openSettings(ctx: Context) {
+        val (pkg, ch) = channel ?: ("com.google.android.apps.maps" to null)
+        val app = Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, pkg).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val one = ch?.let {
+            Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, pkg)
+                .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, it).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            ctx.startActivity(one ?: app)
+        } catch (_: Exception) {
+            runCatching { ctx.startActivity(app) }
+        }
     }
 }
 

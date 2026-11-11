@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.Hearing
 import androidx.compose.material.icons.outlined.DataUsage
 import androidx.compose.material.icons.outlined.Thermostat
 import androidx.compose.material.icons.outlined.Close
@@ -44,6 +45,7 @@ import androidx.compose.material.icons.outlined.DirectionsCar
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.MyLocation
 import androidx.compose.material.icons.outlined.Navigation
+import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material.icons.outlined.Settings
@@ -213,6 +215,11 @@ fun SettingsDialog(
     var hotword by remember { mutableStateOf(Prefs.hotword) }
     var sensorPref by remember { mutableStateOf(Prefs.tuyaSensor) }
     var hotwordSens by remember { mutableStateOf(Prefs.hotwordSens) }
+    var micMode by remember { mutableStateOf(Prefs.micMode.coerceIn(0, Hotword.MIC_MODES.size - 1)) }
+    var micGain by remember { mutableStateOf(Prefs.micGain) }
+    var phrase by remember { mutableStateOf(Prefs.hotwordPhrase) }
+    var phraseDlg by remember { mutableStateOf(false) }
+    if (phraseDlg) HotwordPhraseDialog { phraseDlg = false; phrase = Prefs.hotwordPhrase }
     var tokenLimit by remember { mutableStateOf(Prefs.aiTokenLimit) }
     val ttsEngine = Prefs.ttsEngine
     var group by remember { mutableStateOf(Prefs.settingsGroup.coerceIn(0, SETTINGS_GROUPS.size - 1)) }
@@ -307,6 +314,16 @@ fun SettingsDialog(
                         open(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
                     }
                 }
+                item {
+                    val auto = remember(tick) { NavPopups.canAuto(act) }
+                    var hide by remember { mutableStateOf(Prefs.hideNavPopups) }
+                    if (auto) SettingTile(Icons.Outlined.Navigation, "Ukryj wyskakujące komunikaty Map",
+                        if (hide) "W czasie nawigacji nic nie wyskakuje z góry – manewry są w bloku Nawigacja" else "Mapy w tle pokazują manewry w okienku u góry", on = hide) {
+                        hide = !hide; Prefs.hideNavPopups = hide
+                        NavPopups.apply(act, NavState.info.value != null)
+                    } else SettingTile(Icons.Outlined.Navigation, "Wyskakujące komunikaty Map",
+                        "Dotknij i w powiadomieniach Map przy nawigacji wyłącz „Wyświetlaj na ekranie”") { NavPopups.openSettings(act) }
+                }
                 item { SettingTile(Icons.Outlined.Home, "Adres: Dom", Prefs.home.ifBlank { "z Map Google (zapisany Dom)" }) { onAddress(false) } }
                 item { SettingTile(Icons.Outlined.Work, "Adres: Praca", Prefs.work.ifBlank { "z Map Google (zapisana Praca)" }) { onAddress(true) } }
                 item { SettingTile(Icons.Outlined.Place, "Trzecie miejsce: " + Prefs.place3Name.ifBlank { "wyłączone" }, Prefs.place3Address.ifBlank { "etykieta wyszukana w Mapach Google" }) { onPlace3() } }
@@ -333,6 +350,20 @@ fun SettingsDialog(
                 item {
                     SettingTile(Icons.Outlined.Warning, "Ostrzeżenie „Zapnij pasy”", if (beltOn.value) "Tylko w czasie jazdy; sygnał z CAN może obejmować puste fotele" else "Ostrzega zestaw wskaźników BMW", on = beltOn.value) {
                         beltOn.value = !beltOn.value; Prefs.beltWarn = beltOn.value
+                    }
+                }
+                item {
+                    var on by remember { mutableStateOf(Prefs.phoneToIdrive) }
+                    SettingTile(Icons.Outlined.Phone, "Rozmowa → ekran iDrive", if (on) "Przy rozmowie z telefonu w BMW otwiera ekran iDrive" else "Wyłączone", on = on) {
+                        on = !on; Prefs.phoneToIdrive = on
+                    }
+                }
+                item {
+                    var on by remember { mutableStateOf(Prefs.canLogs) }
+                    SettingTile(Icons.Outlined.DataUsage, "Dane auta z dzienników radia",
+                        if (on) "Paliwo, bieg, temperatura, telefon → iDrive. Android pyta o zgodę po starcie Kokpitu"
+                        else "Bez pytania o zgodę – zostają tylko drzwi i prędkość", on = on) {
+                        on = !on; Prefs.canLogs = on; CanSource.logsChanged()
                     }
                 }
                 item { SettingTile(Icons.Outlined.PlayCircle, "Pokaz danych auta", if (demo) "Paliwo i drzwi to dane przykładowe" else "Paliwo i drzwi z modułu CAN radia", on = demo) { onDemo(!demo) } }
@@ -405,7 +436,7 @@ fun SettingsDialog(
                 }
                 item {
                     val overlay = android.provider.Settings.canDrawOverlays(act)
-                    SettingTile(Icons.Outlined.Mic, "Hasło „OK BMW”",
+                    SettingTile(Icons.Outlined.Mic, "Hasło głosowe („OK BMW”)",
                         when {
                             !hotword -> "Wyłączone – nie zużywa mikrofonu ani procesora"
                             !overlay -> "Włączone, ale brak zgody „Wyświetlanie nad innymi” – dotknij"
@@ -432,9 +463,37 @@ fun SettingsDialog(
                 }
                 if (hotword) item {
                     val names = listOf("niska – tylko wyraźne „OK BMW”", "średnia", "wysoka – reaguje łatwiej, częściej sam się włącza")
-                    SettingTile(Icons.Outlined.Tune, "Czułość „OK BMW”: " + names[hotwordSens].substringBefore(" –"),
+                    SettingTile(Icons.Outlined.Tune, "Czułość hasła: " + names[hotwordSens].substringBefore(" –"),
                         names[hotwordSens].substringAfter("– ", "Dotknij, aby zmienić")) {
                         hotwordSens = (hotwordSens + 1) % 3; Prefs.hotwordSens = hotwordSens
+                    }
+                }
+                if (hotword) item {
+                    val nt by Hotword.note
+                    SettingTile(Icons.Outlined.EditNote, "Hasło: „" + (phrase.ifBlank { "ok bmw" }) + "”",
+                        nt.ifEmpty { "Dotknij, aby wpisać własne hasło" }) { phraseDlg = true }
+                }
+                if (hotword) item {
+                    SettingTile(Icons.Outlined.Mic, "Mikrofon: " + Hotword.MIC_MODES[micMode].first,
+                        Hotword.MIC_MODES[micMode].second + ". Dotknij, aby zmienić") {
+                        micMode = (micMode + 1) % Hotword.MIC_MODES.size; Prefs.micMode = micMode; Hotword.restart()
+                    }
+                }
+                if (hotword) item {
+                    SettingTile(Icons.Outlined.GraphicEq, "Wzmocnienie mikrofonu",
+                        if (micGain) "Samo podgłaśnia cichy głos (mikrofon daleko)" else "Wyłączone – dźwięk bez zmian", on = micGain) {
+                        micGain = !micGain; Prefs.micGain = micGain; Hotword.restart()
+                    }
+                }
+                if (hotword) item {
+                    // podgląd na żywo: czy radio słyszy i co rozpoznaje
+                    val st by Hotword.status
+                    val lv by Hotword.level
+                    val gn by Hotword.gain
+                    val hd by Hotword.heard
+                    SettingTile(Icons.Outlined.Hearing, "Test mikrofonu: $st",
+                        "Głośność ${(lv * 100).toInt()}% · wzmocnienie ×${"%.0f".format(gn)}" + (if (hd.isEmpty()) " · powiedz hasło" else " · słyszę: $hd")) {
+                        Hotword.restart()
                     }
                 }
                 item {
@@ -732,6 +791,45 @@ fun InstructionsDialog(onClose: () -> Unit) {
                 Assistant.reset()
                 onClose()
             }) { Text("Zapisz") }
+        },
+        dismissButton = { TextButton(onClick = onClose) { Text("Anuluj") } },
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    )
+}
+
+/** Własne hasło wywołujące asystenta zamiast „OK BMW”. */
+@Composable
+fun HotwordPhraseDialog(onClose: () -> Unit) {
+    var text by remember { mutableStateOf(Prefs.hotwordPhrase) }
+    fun save() {
+        Prefs.hotwordPhrase = text.trim()
+        Hotword.restart()
+        onClose()
+    }
+    AlertDialog(
+        onDismissRequest = onClose,
+        containerColor = CardBg,
+        title = { Text("Hasło wywołujące asystenta", color = Txt) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(d(12))) {
+                OutlinedTextField(
+                    text, { text = it }, singleLine = true,
+                    modifier = Modifier.width(d(1100)),
+                    placeholder = { Text("ok bmw, okej bmw, hej bmw") },
+                    // klawiatura zasłania przyciski okna – „gotowe” na klawiaturze też zapisuje
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { save() }),
+                )
+                Text(
+                    "Pisz zwykłymi polskimi słowami, tak jak się mówi – np. „hej kokpit” albo „halo auto”. Kilka haseł oddziel przecinkiem. " +
+                        "Najpewniej działają dwa słowa; jedno krótkie słowo będzie się włączać samo przy rozmowie. " +
+                        "Puste pole = „OK BMW”. Po zapisaniu sprawdź w kafelku „Test mikrofonu”, czy radio rozpoznaje hasło.",
+                    color = Dim, fontSize = s(18),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { save() }) { Text("Zapisz") }
         },
         dismissButton = { TextButton(onClick = onClose) { Text("Anuluj") } },
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),

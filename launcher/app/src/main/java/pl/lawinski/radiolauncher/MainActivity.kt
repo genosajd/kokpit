@@ -150,6 +150,8 @@ class MainActivity : ComponentActivity() {
         liveCamera.value = Prefs.liveCamera
         removeOldCarModel()
         CanSource.start(this)
+        // po nagłym końcu nawigacji / procesu: przywróć wyskakujące powiadomienia
+        NavPopups.apply(this, NavState.info.value != null)
         layout.value = LayoutStore.decode(Prefs.layout)
         hasSavedLayout.value = Prefs.layoutSaved.isNotBlank()
         layout.value.filter { it.id == BlockId.WIDGET }.forEach { blockWidgets[it.n] = Prefs.blockWidgetId(it.n) }
