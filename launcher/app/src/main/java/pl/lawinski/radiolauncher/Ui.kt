@@ -35,6 +35,8 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AcUnit
+import androidx.compose.material.icons.outlined.DirectionsCar
+import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.WaterDrop
 import androidx.compose.material.icons.outlined.Air
@@ -504,10 +506,9 @@ fun EditBar(slots: List<Slot>, onAdd: (BlockId) -> Unit, onReset: () -> Unit, on
     Row(Modifier.fillMaxWidth().height(d(76)), verticalAlignment = Alignment.CenterVertically) {
         Text("Przeciągnij klocek · niebieski uchwyt zmienia rozmiar", color = Dim, fontSize = s(24))
         Spacer(Modifier.width(d(30)))
-        BlockId.entries.filter { id -> id.multi || slots.none { it.id == id } }.forEach { id ->
-            Pill(Icons.Outlined.Add, id.title, onClick = { onAdd(id) })
-            Spacer(Modifier.width(d(12)))
-        }
+        var picker by remember { mutableStateOf(false) }
+        Pill(Icons.Outlined.Add, "Widżety", onClick = { picker = true })
+        if (picker) BlockPickerDialog(slots, onAdd = { picker = false; onAdd(it) }, onClose = { picker = false })
         Spacer(Modifier.weight(1f))
         Pill(Icons.Outlined.Save, "Zapisz układ", onClick = onStore)
         Spacer(Modifier.width(d(14)))
@@ -518,6 +519,59 @@ fun EditBar(slots: List<Slot>, onAdd: (BlockId) -> Unit, onReset: () -> Unit, on
         Pill(null, "Domyślny", onClick = onReset)
         Spacer(Modifier.width(d(14)))
         Pill(null, "Gotowe", color = LocalTheme.current.activeText, active = true, onClick = onDone)
+    }
+}
+
+/** Opis klocka w oknie „Widżety”: ikona, przykładowa treść do podglądu i jedno zdanie, co pokazuje. */
+private class BlockInfo(val icon: ImageVector, val sample: String, val desc: String)
+
+private fun blockInfo(id: BlockId) = when (id) {
+    BlockId.SHORTCUTS -> BlockInfo(Icons.Outlined.Apps, "YouTube · Mapy · …", "Twoje aplikacje na przewijanych stronach")
+    BlockId.CAR -> BlockInfo(Icons.Outlined.DirectionsCar, "0 km/h · 48 l", "Prędkość, paliwo, otwarte drzwi, ekran iDrive")
+    BlockId.NAV -> BlockInfo(Icons.Outlined.Navigation, "Za 300 m w lewo", "Trasa z Map Google i Waze, Dom i Praca")
+    BlockId.CAMERA -> BlockInfo(Icons.Outlined.Videocam, "Obraz na żywo", "Podgląd kamer z Xiaomi Cam")
+    BlockId.WEATHER -> BlockInfo(Icons.Outlined.WbSunny, "3° · pochmurno", "Pogoda teraz i prognoza")
+    BlockId.WIDGET -> BlockInfo(Icons.Outlined.Widgets, "Dowolny widżet", "Widżet innej aplikacji – można dodać kilka")
+    BlockId.ASSISTANT -> BlockInfo(Icons.Outlined.SmartToy, "„Jaka będzie pogoda?”", "Rozmowa z asystentem AI, pisana i głosowa")
+    BlockId.CLIMATE -> BlockInfo(Icons.Outlined.AcUnit, "20,6° w domu", "Klimatyzator w domu (Smart Life)")
+    BlockId.TUYA -> BlockInfo(Icons.Outlined.Lightbulb, "Światło · czujnik", "Urządzenie Smart Life – można dodać kilka")
+}
+
+/** Okno „Widżety” w edycji układu: siatka klocków z podglądem i nazwą; dotknięcie dodaje klocek do ekranu. */
+@Composable
+fun BlockPickerDialog(slots: List<Slot>, onAdd: (BlockId) -> Unit, onClose: () -> Unit) {
+    val free = BlockId.entries.filter { id -> id.multi || slots.none { it.id == id } }
+    Sheet("Dodaj widżet", onClose) {
+        if (free.isEmpty()) {
+            Text("Wszystkie widżety są już na ekranie.", color = Dim, fontSize = s(24), modifier = Modifier.padding(top = d(30)))
+            return@Sheet
+        }
+        androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+            columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(4),
+            modifier = Modifier.fillMaxSize().padding(top = d(20)),
+            horizontalArrangement = Arrangement.spacedBy(d(18)),
+            verticalArrangement = Arrangement.spacedBy(d(18)),
+        ) {
+            items(free.size) { i ->
+                val id = free[i]
+                val info = blockInfo(id)
+                Column(Modifier.fillMaxWidth().kokpitSurface(d(22)).combinedClickable(onClick = { onAdd(id) }).padding(d(16))) {
+                    // podgląd: pomniejszony klocek z nagłówkiem i przykładową treścią
+                    Column(
+                        Modifier.fillMaxWidth().height(d(190)).clip(RoundedCornerShape(d(18))).background(LocalTheme.current.screen)
+                            .border(1.dp, LocalTheme.current.blockEdge, RoundedCornerShape(d(18))).padding(d(18)),
+                    ) {
+                        Label(info.icon, id.title)
+                        Spacer(Modifier.weight(1f))
+                        Icon(info.icon, null, tint = Accent, modifier = Modifier.size(d(54)))
+                        Spacer(Modifier.height(d(8)))
+                        Text(info.sample, color = Txt, fontSize = s(24), fontWeight = FontWeight.Light, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Text(id.title, color = Txt, fontSize = s(24), fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = d(12)))
+                    Text(info.desc, color = Dim, fontSize = s(18), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
     }
 }
 
