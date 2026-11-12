@@ -204,6 +204,23 @@ class MainActivity : ComponentActivity() {
         override fun onReceive(context: Context, intent: Intent) = reloadApps()
     }
 
+    /**
+     * Testy przez ADB: `am broadcast -a pl.lawinski.radiolauncher.TEST --es ask "pytanie"` (pytanie do asystenta)
+     * albo `--es places '{"action":"search",…}'` (samo narzędzie, wynik w logu KokpitTest). Odbiornik wymaga
+     * uprawnienia DUMP, które ma powłoka ADB, a zwykłe aplikacje nie – inna aplikacja tego nie wywoła.
+     */
+    private val testHook = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            intent.getStringExtra("ask")?.takeIf { it.isNotBlank() }?.let { Assistant.send(this@MainActivity, it) }
+            intent.getStringExtra("places")?.let { json ->
+                Thread {
+                    val out = try { Places.run(this@MainActivity, org.json.JSONObject(json)) } catch (e: Exception) { "błąd: $e" }
+                    out.lines().forEach { android.util.Log.i("KokpitTest", it) }
+                }.start()
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Prefs.init(this)
@@ -237,6 +254,8 @@ class MainActivity : ComponentActivity() {
             addAction(Intent.ACTION_PACKAGE_CHANGED)
             addDataScheme("package")
         }, ContextCompat.RECEIVER_NOT_EXPORTED)
+        ContextCompat.registerReceiver(this, testHook, IntentFilter("pl.lawinski.radiolauncher.TEST"),
+            Manifest.permission.DUMP, null, ContextCompat.RECEIVER_EXPORTED)
 
         setContent { LauncherScreen(this) }
         handleVoiceIntent(intent)
@@ -275,6 +294,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         if (live === this) live = null
         unregisterReceiver(packagesChanged)
+        unregisterReceiver(testHook)
         Speech.shutdown()
         super.onDestroy()
     }
