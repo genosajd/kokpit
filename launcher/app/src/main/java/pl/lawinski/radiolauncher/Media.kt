@@ -383,7 +383,7 @@ fun MediaBlock(modifier: Modifier, slot: Slot, act: MainActivity) {
         }
         val cover: @Composable (Modifier) -> Unit = { m ->
             // przesunięcie palcem po okładce (w dowolną stronę) przełącza okładkę i słupki dźwięku; wybór zostaje
-            var bars by remember { mutableStateOf(Prefs.mediaBars) }
+            var view by remember { androidx.compose.runtime.mutableIntStateOf(Prefs.mediaView.coerceIn(0, BAR_STYLES)) }
             val swipe = with(androidx.compose.ui.platform.LocalDensity.current) { d(36).toPx() }
             Box(
                 m.clip(RoundedCornerShape(d(18))).background(LocalTheme.current.blockEdge)
@@ -396,20 +396,30 @@ fun MediaBlock(modifier: Modifier, slot: Slot, act: MainActivity) {
                             onDrag = { change, by ->
                                 change.consume()
                                 moved += by
-                                if (!done && moved.getDistance() > swipe) { done = true; bars = !bars; Prefs.mediaBars = bars }
+                                if (!done && moved.getDistance() > swipe) {
+                                    done = true
+                                    // w lewo albo w górę = następny widok, w prawo albo w dół = poprzedni; bez okładki same słupki
+                                    val main = if (kotlin.math.abs(moved.x) >= kotlin.math.abs(moved.y)) moved.x else moved.y
+                                    val first = if (n.art != null) 0 else 1
+                                    val all = BAR_STYLES + 1 - first
+                                    view = first + ((view.coerceAtLeast(first) - first + (if (main < 0) 1 else -1) + all) % all)
+                                    Prefs.mediaView = view
+                                }
                             },
                         )
                     },
                 contentAlignment = Alignment.Center,
             ) {
                 val a = n.art
-                Crossfade(a == null || bars, label = "okładka") { showBars ->
-                    if (!showBars && a != null) Image(a, "Okładka", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                    else SoundBars(n.playing && n.live, Modifier.fillMaxSize().padding(d(22)))
+                val shown = if (a == null) view.coerceAtLeast(1) else view
+                Crossfade(shown, label = "okładka") { v ->
+                    if (v == 0 && a != null) Image(a, "Okładka", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    else SoundBars(n.playing && n.live, v.coerceAtLeast(1), Modifier.fillMaxSize().padding(start = d(22), end = d(22), top = d(22), bottom = d(26)))
                 }
-                // dwie kropki: który widok jest wybrany (tylko gdy jest z czego wybierać)
-                if (a != null) Row(Modifier.align(Alignment.BottomCenter).padding(bottom = d(8)), horizontalArrangement = Arrangement.spacedBy(d(6))) {
-                    listOf(!bars, bars).forEach { on ->
+                // kropki: który widok jest wybrany (okładka, potem kolejne rodzaje słupków)
+                Row(Modifier.align(Alignment.BottomCenter).padding(bottom = d(8)), horizontalArrangement = Arrangement.spacedBy(d(6))) {
+                    ((if (a != null) 0 else 1)..BAR_STYLES).forEach { i ->
+                        val on = i == shown
                         Box(Modifier.size(d(8)).clip(androidx.compose.foundation.shape.CircleShape).background(androidx.compose.ui.graphics.Color.White.copy(alpha = if (on) 0.9f else 0.35f)))
                     }
                 }
@@ -458,10 +468,12 @@ private fun MediaButton(icon: ImageVector, desc: String, modifier: Modifier, mai
  * Działa tylko, gdy coś gra i blok jest widoczny.
  */
 @Composable
-private fun SoundBars(playing: Boolean, modifier: Modifier) {
+private fun SoundBars(playing: Boolean, style: Int, modifier: Modifier) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val count = 18
     val levels = remember { FloatArray(count) { 0.06f } }
+    // znaczniki szczytów: zostają chwilę na górze i powoli opadają
+    val peaks = remember { FloatArray(count) { 0.06f } }
     val frame = remember { androidx.compose.runtime.mutableIntStateOf(0) }
     DisposableEffect(playing) {
         val main = Handler(Looper.getMainLooper())
@@ -481,6 +493,7 @@ private fun SoundBars(playing: Boolean, modifier: Modifier) {
                 if (!ticking) return
                 if (!playing) for (i in 0 until count) levels[i] = maxOf(0.06f, levels[i] * 0.8f)
                 else if (vis == null || (silentSince != 0L && SystemClock.elapsedRealtime() - silentSince > 1500)) fake()
+                for (i in 0 until count) peaks[i] = maxOf(levels[i], peaks[i] - 0.025f)
                 frame.intValue++
                 main.postDelayed(this, 80)
             }
@@ -520,17 +533,97 @@ private fun SoundBars(playing: Boolean, modifier: Modifier) {
         }
     }
     val top = Accent
+    val violet = androidx.compose.ui.graphics.Color(0xFF8B5CF6)
+    val hot = Warn
     androidx.compose.foundation.Canvas(modifier) {
         frame.intValue // przerysuj przy każdej nowej klatce
-        val gap = size.width / count * 0.32f
-        val bw = size.width / count - gap
-        val brush = androidx.compose.ui.graphics.Brush.verticalGradient(listOf(top, top.copy(alpha = 0.35f)))
-        for (i in 0 until count) {
-            val h = size.height * levels[i]
-            drawRoundRect(
-                brush, topLeft = androidx.compose.ui.geometry.Offset(i * (bw + gap) + gap / 2, size.height - h),
-                size = androidx.compose.ui.geometry.Size(bw, h), cornerRadius = androidx.compose.ui.geometry.CornerRadius(bw / 3),
-            )
+        val w = size.width
+        val h = size.height
+        fun rect(brush: androidx.compose.ui.graphics.Brush, x: Float, y: Float, bw: Float, bh: Float, r: Float = bw / 3) =
+            drawRoundRect(brush, androidx.compose.ui.geometry.Offset(x, y), androidx.compose.ui.geometry.Size(bw, bh), androidx.compose.ui.geometry.CornerRadius(r))
+        when (style) {
+            // 2. lustro: bas na środku, słupki rosną w górę i w dół od osi
+            2 -> {
+                val n = count * 2
+                val step = w / n
+                val bw = step * 0.62f
+                val brush = androidx.compose.ui.graphics.Brush.verticalGradient(listOf(violet.copy(alpha = 0.5f), top, violet.copy(alpha = 0.5f)))
+                for (k in 0 until n) {
+                    val lv = levels[if (k < count) count - 1 - k else k - count]
+                    val bh = h * lv
+                    rect(brush, k * step + (step - bw) / 2, (h - bh) / 2, bw, bh, bw / 2)
+                }
+            }
+            // 3. segmenty jak we wskaźniku wysterowania: klocki, najwyższe w ostrzegawczym kolorze, osobny klocek szczytu
+            3 -> {
+                val cols = 12
+                val rows = 10
+                val step = w / cols
+                val bw = step * 0.74f
+                val rowH = h / rows
+                val segH = rowH * 0.7f
+                for (c in 0 until cols) {
+                    val src = c * count / cols
+                    val lit = (levels[src] * rows + 0.5f).toInt()
+                    val peak = (peaks[src] * rows + 0.5f).toInt().coerceIn(1, rows)
+                    for (r in 0 until rows) {
+                        val color = if (r >= rows - 2) hot else if (r >= rows - 5) violet else top
+                        val on = r < lit || r == peak - 1
+                        rect(androidx.compose.ui.graphics.SolidColor(color.copy(alpha = if (on) 1f else 0.13f)),
+                            c * step + (step - bw) / 2, h - (r + 1) * rowH + (rowH - segH) / 2, bw, segH, segH / 4)
+                    }
+                }
+            }
+            // 4. cienkie kreski z opadającymi znacznikami szczytów
+            4 -> {
+                val n = count * 2
+                val step = w / n
+                val bw = step * 0.34f
+                val brush = androidx.compose.ui.graphics.Brush.verticalGradient(listOf(violet, top.copy(alpha = 0.5f)))
+                for (k in 0 until n) {
+                    // między dwoma pomiarami wartość pośrednia, żeby kresek było dwa razy więcej
+                    val a = k / 2
+                    val b = minOf(count - 1, a + k % 2)
+                    val lv = (levels[a] + levels[b]) / 2
+                    val pk = (peaks[a] + peaks[b]) / 2
+                    val x = k * step + (step - bw) / 2
+                    rect(brush, x, h - h * lv, bw, h * lv, bw / 2)
+                    rect(androidx.compose.ui.graphics.SolidColor(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.85f)),
+                        x - bw * 0.4f, (h - h * pk - bw * 1.6f).coerceAtLeast(0f), bw * 1.8f, bw * 0.9f, bw / 2)
+                }
+            }
+            // 5. koło: słupki rozchodzą się promieniście od pierścienia, lewa i prawa połowa symetrycznie
+            5 -> {
+                val n = count * 2
+                val cx = w / 2
+                val cy = h / 2
+                val r0 = minOf(w, h) * 0.2f
+                val rMax = minOf(w, h) * 0.5f
+                val stroke = (2f * Math.PI.toFloat() * r0 / n) * 0.55f
+                for (k in 0 until n) {
+                    val lv = levels[if (k < count) k else n - 1 - k]
+                    val ang = (-90f + 360f * (k + 0.5f) / n) * (Math.PI.toFloat() / 180f)
+                    val r1 = r0 + (rMax - r0) * lv
+                    val dx = kotlin.math.cos(ang)
+                    val dy = kotlin.math.sin(ang)
+                    drawLine(
+                        androidx.compose.ui.graphics.lerp(top, violet, (if (k < count) k else n - 1 - k).toFloat() / count),
+                        androidx.compose.ui.geometry.Offset(cx + dx * r0, cy + dy * r0), androidx.compose.ui.geometry.Offset(cx + dx * r1, cy + dy * r1),
+                        strokeWidth = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                    )
+                }
+                drawCircle(top.copy(alpha = 0.25f), r0 * 0.78f, androidx.compose.ui.geometry.Offset(cx, cy))
+            }
+            // 1. zwykłe słupki od dołu
+            else -> {
+                val gap = w / count * 0.32f
+                val bw = w / count - gap
+                val brush = androidx.compose.ui.graphics.Brush.verticalGradient(listOf(top, top.copy(alpha = 0.35f)))
+                for (i in 0 until count) rect(brush, i * (bw + gap) + gap / 2, h - h * levels[i], bw, h * levels[i])
+            }
         }
     }
 }
+
+/** Liczba rodzajów słupków w bloku Multimedia (widok 0 to okładka). */
+private const val BAR_STYLES = 5

@@ -113,10 +113,10 @@ object Prefs {
         get() = sp.getString("slack_token", "") ?: ""
         set(v) = sp.edit().putString("slack_token", v).apply()
 
-    /** blok Multimedia: słupki dźwięku zamiast okładki (zmiana przesunięciem palca po okładce) */
-    var mediaBars: Boolean
-        get() = sp.getBoolean("media_bars", false)
-        set(v) = sp.edit().putBoolean("media_bars", v).apply()
+    /** blok Multimedia: 0 = okładka, 1… = rodzaj słupków dźwięku (zmiana przesunięciem palca po okładce) */
+    var mediaView: Int
+        get() = if (sp.contains("media_view")) sp.getInt("media_view", 0) else if (sp.getBoolean("media_bars", false)) 1 else 0
+        set(v) = sp.edit().putInt("media_view", v).apply()
 
     /** klucz Google Maps Platform (Places.kt: szukanie miejsc i czas dojazdu dla asystenta); tylko w radiu */
     var googleKey: String
