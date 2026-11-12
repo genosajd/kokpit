@@ -20,7 +20,10 @@ import android.util.Log
 import android.view.KeyEvent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -379,13 +382,37 @@ fun MediaBlock(modifier: Modifier, slot: Slot, act: MainActivity) {
                 color = Dim, fontSize = s(18), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = d(4)))
         }
         val cover: @Composable (Modifier) -> Unit = { m ->
+            // przesunięcie palcem po okładce (w dowolną stronę) przełącza okładkę i słupki dźwięku; wybór zostaje
+            var bars by remember { mutableStateOf(Prefs.mediaBars) }
+            val swipe = with(androidx.compose.ui.platform.LocalDensity.current) { d(36).toPx() }
             Box(
-                m.clip(RoundedCornerShape(d(18))).background(LocalTheme.current.blockEdge).combinedClickable(onClick = { MediaHub.open(act) }),
+                m.clip(RoundedCornerShape(d(18))).background(LocalTheme.current.blockEdge)
+                    .combinedClickable(onClick = { MediaHub.open(act) })
+                    .pointerInput(Unit) {
+                        var moved = androidx.compose.ui.geometry.Offset.Zero
+                        var done = false
+                        detectDragGestures(
+                            onDragStart = { moved = androidx.compose.ui.geometry.Offset.Zero; done = false },
+                            onDrag = { change, by ->
+                                change.consume()
+                                moved += by
+                                if (!done && moved.getDistance() > swipe) { done = true; bars = !bars; Prefs.mediaBars = bars }
+                            },
+                        )
+                    },
                 contentAlignment = Alignment.Center,
             ) {
                 val a = n.art
-                if (a != null) Image(a, "Okładka", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                else SoundBars(n.playing && n.live, Modifier.fillMaxSize().padding(d(22)))
+                Crossfade(a == null || bars, label = "okładka") { showBars ->
+                    if (!showBars && a != null) Image(a, "Okładka", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    else SoundBars(n.playing && n.live, Modifier.fillMaxSize().padding(d(22)))
+                }
+                // dwie kropki: który widok jest wybrany (tylko gdy jest z czego wybierać)
+                if (a != null) Row(Modifier.align(Alignment.BottomCenter).padding(bottom = d(8)), horizontalArrangement = Arrangement.spacedBy(d(6))) {
+                    listOf(!bars, bars).forEach { on ->
+                        Box(Modifier.size(d(8)).clip(androidx.compose.foundation.shape.CircleShape).background(androidx.compose.ui.graphics.Color.White.copy(alpha = if (on) 0.9f else 0.35f)))
+                    }
+                }
             }
         }
         when {
