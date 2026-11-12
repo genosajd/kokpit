@@ -335,6 +335,12 @@ fun SettingsDialog(
                     } else SettingTile(Icons.Outlined.Navigation, "Wyskakujące komunikaty Map",
                         "Dotknij i w powiadomieniach Map przy nawigacji wyłącz „Wyświetlaj na ekranie”") { NavPopups.openSettings(act) }
                 }
+                item {
+                    val key = Prefs.googleKey
+                    SettingTile(Icons.Outlined.Key, "Klucz Google Maps",
+                        if (key.isBlank()) "Nie wpisano – asystent nie szuka miejsc ani nie zna czasu dojazdu" else "Wpisany: …" + key.takeLast(4) + " – asystent szuka miejsc i zna korki",
+                        on = key.isNotBlank()) { onAiField(AiField.GOOGLE_KEY) }
+                }
                 item { SettingTile(Icons.Outlined.Home, "Adres: Dom", Prefs.home.ifBlank { "z Map Google (zapisany Dom)" }) { onAddress(false) } }
                 item { SettingTile(Icons.Outlined.Work, "Adres: Praca", Prefs.work.ifBlank { "z Map Google (zapisana Praca)" }) { onAddress(true) } }
                 item { SettingTile(Icons.Outlined.Place, "Trzecie miejsce: " + Prefs.place3Name.ifBlank { "wyłączone" }, Prefs.place3Address.ifBlank { "etykieta wyszukana w Mapach Google" }) { onPlace3() } }
@@ -874,6 +880,7 @@ enum class AiField(val title: String, val hint: String, val secret: Boolean) {
     TUYA_ID("Tuya Access ID", "z projektu na platform.tuya.com", false),
     TUYA_SECRET("Tuya Access Secret", "z projektu na platform.tuya.com", true),
     SLACK_TOKEN("Slack: User OAuth Token", "xoxp-…", true),
+    GOOGLE_KEY("Klucz Google Maps Platform", "AIza…", true),
 }
 
 /** Wpisanie klucza API albo nazwy modelu asystenta; puste pole modelu = domyślny. */
@@ -889,6 +896,7 @@ fun AiFieldDialog(field: AiField, onClose: () -> Unit) {
                 AiField.TUYA_ID -> Prefs.tuyaId
                 AiField.TUYA_SECRET -> Prefs.tuyaSecret
                 AiField.SLACK_TOKEN -> Prefs.slackToken
+                AiField.GOOGLE_KEY -> Prefs.googleKey
             }
         )
     }
@@ -911,6 +919,7 @@ fun AiFieldDialog(field: AiField, onClose: () -> Unit) {
                     when {
                         field == AiField.TUYA_ID || field == AiField.TUYA_SECRET -> "Projekt „Kokpit F11” → Overview → Authorization Key. Zostaje tylko w radiu."
                         field == AiField.SLACK_TOKEN -> "api.slack.com/apps → Kokpit F11 → OAuth & Permissions → User OAuth Token. Zostaje tylko w radiu."
+                        field == AiField.GOOGLE_KEY -> "console.cloud.google.com → projekt z włączonymi „Places API (New)” i „Routes API” → Dane logowania → klucz API. Zostaje tylko w radiu; płatne według zużycia ponad darmowy limit Google."
                         field.secret -> "Klucz zostaje tylko w radiu. Za zapytania płacisz u dostawcy według zużycia."
                         else -> "Puste pole = model domyślny (${field.hint})."
                     },
@@ -928,6 +937,7 @@ fun AiFieldDialog(field: AiField, onClose: () -> Unit) {
                     AiField.TUYA_ID -> { Prefs.tuyaId = text; Tuya.reset() }
                     AiField.TUYA_SECRET -> { Prefs.tuyaSecret = text; Tuya.reset() }
                     AiField.SLACK_TOKEN -> { Prefs.slackToken = text; Slack.reset() }
+                    AiField.GOOGLE_KEY -> Prefs.googleKey = text
                 }
                 Assistant.reset()
                 onClose()

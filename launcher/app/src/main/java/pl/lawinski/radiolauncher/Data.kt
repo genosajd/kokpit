@@ -113,6 +113,11 @@ object Prefs {
         get() = sp.getString("slack_token", "") ?: ""
         set(v) = sp.edit().putString("slack_token", v).apply()
 
+    /** klucz Google Maps Platform (Places.kt: szukanie miejsc i czas dojazdu dla asystenta); tylko w radiu */
+    var googleKey: String
+        get() = sp.getString("google_key", "") ?: ""
+        set(v) = sp.edit().putString("google_key", v).apply()
+
     /** reguły właściciela (Rules.kt), tablica JSON */
     var rules: String
         get() = sp.getString("rules", "[]") ?: "[]"
@@ -325,8 +330,12 @@ object Apps {
 }
 
 /** Nawigacja do zapisanego adresu w Mapach Google (albo w dowolnej aplikacji obsługującej geo:). */
-fun navigateTo(ctx: Context, address: String) {
-    val maps = Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=" + Uri.encode(address)))
+fun navigateTo(ctx: Context, address: String, stops: List<String> = emptyList()) {
+    // przystanki: adres „Maps URLs” (google.navigation ich nie przyjmuje)
+    val uri = if (stops.isEmpty()) "google.navigation:q=" + Uri.encode(address)
+    else "https://www.google.com/maps/dir/?api=1&travelmode=driving&dir_action=navigate&destination=" + Uri.encode(address) +
+        "&waypoints=" + Uri.encode(stops.joinToString("|"))
+    val maps = Intent(Intent.ACTION_VIEW, Uri.parse(uri))
         .setPackage("com.google.android.apps.maps").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     try {
         ctx.startActivity(maps)

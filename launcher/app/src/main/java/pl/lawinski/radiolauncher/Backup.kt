@@ -39,7 +39,7 @@ object Backup {
     private const val MARK = "kokpit_ustawienia"
 
     /** klucze API i tokeny – eksportowane tylko na wyraźne życzenie */
-    val SECRET = setOf("anthropic_key", "openai_key", "tuya_id", "tuya_secret", "slack_token")
+    val SECRET = setOf("anthropic_key", "openai_key", "tuya_id", "tuya_secret", "slack_token", "google_key")
 
     /** stan tego jednego radia, bez sensu w innym: numery widżetów Androida, stan chwilowy */
     private fun local(key: String) = key == "camera_widget" || key.startsWith("block_widget") ||

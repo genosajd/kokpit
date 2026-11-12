@@ -57,8 +57,26 @@ private object AssistantTools {
         Def(
             "navigate",
             "Włącza nawigację w Mapach Google do podanego celu (adres, nazwa miejsca albo np. „najbliższa stacja Orlen”). Użyj, gdy rozmówca prosi o trasę albo zawiezienie gdzieś.",
-            mapOf("destination" to mapOf("type" to "string", "description" to "Cel: adres albo nazwa miejsca, po polsku")),
-            listOf("destination"),
+            mapOf(
+                "destination" to mapOf("type" to "string", "description" to "Cel: adres albo nazwa miejsca, po polsku"),
+                "stops" to mapOf("type" to "string", "description" to "Przystanki po drodze w kolejności, oddzielone średnikiem (np. „Orlen Marki; Biedronka Radzymin”); bez przystanków pusty tekst"),
+            ),
+            listOf("destination", "stops"),
+        ),
+        Def(
+            "places",
+            "Google Maps: szukanie miejsc i czas dojazdu z korkami. search = miejsca pasujące do query (np. „stacja benzynowa”, „pizzeria”, „apteka całodobowa”) w pobliżu auta albo koło near; zwraca nazwę, adres, odległość, ocenę i czy teraz otwarte. route = czas i długość dojazdu autem do destination przy obecnym ruchu (z origin albo z bieżącego położenia, opcjonalnie przez stops), też trasy alternatywne. Samo places niczego nie włącza – nawigację włącza navigate.",
+            mapOf(
+                "action" to mapOf("type" to "string", "enum" to listOf("search", "route")),
+                "query" to mapOf("type" to "string", "description" to "search: czego szukać; inaczej pusty"),
+                "near" to mapOf("type" to "string", "description" to "search: miejscowość albo adres, koło którego szukać; pusty = koło auta"),
+                "open_now" to mapOf("type" to "boolean", "description" to "search: true = tylko teraz otwarte; inaczej false"),
+                "fuel_prices" to mapOf("type" to "boolean", "description" to "search: true tylko, gdy pytanie dotyczy cen paliw na stacjach (droższe zapytanie); inaczej false"),
+                "destination" to mapOf("type" to "string", "description" to "route: cel; inaczej pusty"),
+                "origin" to mapOf("type" to "string", "description" to "route: skąd; pusty = bieżące położenie auta"),
+                "stops" to mapOf("type" to "string", "description" to "route: przystanki po drodze oddzielone średnikiem; inaczej pusty"),
+            ),
+            listOf("action", "query", "near", "open_now", "fuel_prices", "destination", "origin", "stops"),
         ),
         Def(
             "open_saved_place",
@@ -196,11 +214,13 @@ private object AssistantTools {
         "car_status" -> carStatus(act)
         "navigate" -> {
             val dest = input.optString("destination").trim()
+            val stops = Places.stops(input.optString("stops"))
             if (dest.isEmpty()) "Brak celu" else {
-                act.runOnUiThread { navigateTo(act, dest) }
-                "Nawigacja do „$dest” uruchomiona w Mapach Google"
+                act.runOnUiThread { navigateTo(act, dest, stops) }
+                "Nawigacja do „$dest” uruchomiona w Mapach Google" + if (stops.isEmpty()) "" else " z przystankami: " + stops.joinToString()
             }
         }
+        "places" -> Places.run(act, input)
         "open_saved_place" -> {
             when (input.optString("place")) {
                 "home" -> act.runOnUiThread { goSaved(act, Prefs.home, false) }
@@ -480,7 +500,7 @@ private object AssistantTools {
 private const val BASE_PROMPT = """Jesteś asystentem w aucie: ekran radia w BMW F11 Touring z launcherem Kokpit F11. Rozmawia z Tobą kierowca albo pasażer.
 Odpowiadaj po polsku, krótko i naturalnie, zwykle 1–3 zdaniami – odpowiedzi są czytane na głos, więc pisz zwykłym tekstem, bez list, nagłówków, tabel i znaczników Markdown.
 Kierowca nie powinien czytać długich tekstów w czasie jazdy, dlatego najważniejsze mów na początku.
-Masz narzędzia: car_status (stan auta, położenie, trasa), navigate i open_saved_place (włączają nawigację w Mapach Google), open_app (uruchamia aplikację w radiu i może w niej wyszukać), play_youtube (od razu odtwarza w YouTube to, o co ktoś prosi), media_control (pauza, wznowienie, następny, poprzedni, co teraz gra) i radio_control (głośność, jasność, ekran BMW iDrive, podzielony ekran, ustawienia, wygląd Kokpitu) camera_control (obrót kamery, punkty, zoom), home_ac (klimatyzator w domu: temperatura, wł./wył., ustawienie), calendar (kalendarz Google właściciela: terminy i dodawanie nowych), slack (Slack właściciela: nieprzeczytane, czytanie, szukanie i wysyłanie – zawsze z potwierdzeniem) i camera_snapshot (aktualne zdjęcie z kamery Xiaomi – gdy ktoś pyta, co widać na kamerze, zawsze zrób nowe zdjęcie). Gdy ktoś prosi o włączenie muzyki lub filmu, użyj play_youtube. Gdy pytanie dotyczy auta, paliwa, miejsca albo trasy, najpierw sprawdź car_status. Gdy ktoś prosi o trasę, od razu włącz nawigację i krótko to potwierdź."""
+Masz narzędzia: car_status (stan auta, położenie, trasa), navigate i open_saved_place (włączają nawigację w Mapach Google), places (szuka miejsc w Google Maps z ocenami i godzinami otwarcia oraz podaje czas dojazdu z korkami – używaj zamiast zgadywania, gdy ktoś pyta o miejsca w pobliżu albo ile się jedzie), open_app (uruchamia aplikację w radiu i może w niej wyszukać), play_youtube (od razu odtwarza w YouTube to, o co ktoś prosi), media_control (pauza, wznowienie, następny, poprzedni, co teraz gra) i radio_control (głośność, jasność, ekran BMW iDrive, podzielony ekran, ustawienia, wygląd Kokpitu) camera_control (obrót kamery, punkty, zoom), home_ac (klimatyzator w domu: temperatura, wł./wył., ustawienie), calendar (kalendarz Google właściciela: terminy i dodawanie nowych), slack (Slack właściciela: nieprzeczytane, czytanie, szukanie i wysyłanie – zawsze z potwierdzeniem) i camera_snapshot (aktualne zdjęcie z kamery Xiaomi – gdy ktoś pyta, co widać na kamerze, zawsze zrób nowe zdjęcie). Gdy ktoś prosi o włączenie muzyki lub filmu, użyj play_youtube. Gdy pytanie dotyczy auta, paliwa, miejsca albo trasy, najpierw sprawdź car_status. Gdy ktoś prosi o trasę, od razu włącz nawigację i krótko to potwierdź."""
 
 /** Prompt systemowy: stały opis roli + instrukcje właściciela z Ustawień (jak się zwracać, styl…). */
 private fun systemPrompt(): String {

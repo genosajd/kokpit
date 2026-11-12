@@ -9,6 +9,7 @@ import androidx.compose.material.icons.outlined.DirectionsCar
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.Navigation
+import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material.icons.outlined.Radio
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.runtime.mutableStateOf
@@ -28,6 +29,7 @@ object Access {
     val groups = listOf(
         Group("car", "Auto", "Paliwo, drzwi, prędkość, położenie GPS, trasa", Icons.Outlined.DirectionsCar, setOf("car_status")),
         Group("nav", "Nawigacja", "Włączanie trasy w Mapach Google", Icons.Outlined.Navigation, setOf("navigate", "open_saved_place")),
+        Group("places", "Miejsca i trasy (Google)", "Szukanie miejsc w pobliżu, oceny, czas dojazdu z korkami", Icons.Outlined.Place, setOf("places")),
         Group("apps", "Aplikacje", "Uruchamianie aplikacji w radiu", Icons.Outlined.Apps, setOf("open_app")),
         Group("media", "Muzyka i YouTube", "Odtwarzanie, pauza, następny utwór", Icons.Outlined.MusicNote, setOf("play_youtube", "media_control")),
         Group("radio", "Radio", "Głośność, jasność, ekran iDrive, wygląd", Icons.Outlined.Radio, setOf("radio_control")),
