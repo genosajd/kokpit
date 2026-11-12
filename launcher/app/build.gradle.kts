@@ -16,8 +16,8 @@ android {
         applicationId = "pl.lawinski.radiolauncher"
         minSdk = 26
         targetSdk = 35
-        versionCode = 21
-        versionName = "0.3.17"
+        versionCode = 22
+        versionName = "0.3.18"
         // radio: arm64 (Snapdragon 668S); x86_64 tylko dla emulatora
         // -PdoAuta: tylko arm64, mniejszy plik do instalacji w radiu
         ndk { abiFilters += if (project.hasProperty("doAuta")) listOf("arm64-v8a") else listOf("arm64-v8a", "x86_64") }
