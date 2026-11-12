@@ -236,6 +236,10 @@ object Prefs {
     var elevenPausedUntil: Long
         get() = sp.getLong("eleven_paused_until", 0)
         set(v) = sp.edit().putLong("eleven_paused_until", v).apply()
+    /** okienko asystenta: ile czekać na dalszy ciąg zdania po pauzie (0 = wcale, 1 = krótko, 2 = dłużej) */
+    var voicePause: Int
+        get() = sp.getInt("voice_pause", 1)
+        set(v) = sp.edit().putInt("voice_pause", v).apply()
     /** zakładka w Ustawienia → Asystent AI */
     var aiTab: Int
         get() = sp.getInt("settings_ai_tab", 0)

@@ -233,7 +233,23 @@ fun SettingsDialog(
     var aiTab by remember { mutableStateOf(Prefs.aiTab.coerceIn(0, AI_TABS.size - 1)) }
     var elevenModel by remember { mutableStateOf(Prefs.elevenModel) }
     var elevenPaused by remember { mutableStateOf(Speech.elevenPaused()) }
+    var voicePause by remember { mutableStateOf(Prefs.voicePause.coerceIn(0, 2)) }
+    // zużycie znaków ElevenLabs: pobierane przy wejściu w zakładkę „Głos” (null = jeszcze nie ma, tekst = błąd)
+    var elevenUsage by remember { mutableStateOf<Speech.ElevenUsage?>(null) }
+    var elevenUsageErr by remember { mutableStateOf<String?>(null) }
+    var elevenUsageTick by remember { mutableStateOf(0) }
     var group by remember { mutableStateOf(Prefs.settingsGroup.coerceIn(0, SETTINGS_GROUPS.size - 1)) }
+    LaunchedEffect(group, aiTab, tick, elevenUsageTick) {
+        if (SETTINGS_GROUPS.getOrNull(group)?.first != "Asystent AI" || aiTab != 1 || Prefs.elevenKey.isBlank()) return@LaunchedEffect
+        try {
+            elevenUsage = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Speech.elevenUsage() }
+            elevenUsageErr = null
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            elevenUsageErr = e.message ?: e.javaClass.simpleName
+        }
+    }
 
     Sheet("Ustawienia", onClose, widthFraction = 0.94f) {
         Row(Modifier.fillMaxSize()) {
@@ -533,6 +549,24 @@ fun SettingsDialog(
                         elevenModel = Speech.ELEVEN_MODELS[(idx + 1) % Speech.ELEVEN_MODELS.size].first; Prefs.elevenModel = elevenModel
                     }
                 }
+                if (Prefs.elevenKey.isNotBlank()) item {
+                    val u = elevenUsage
+                    val err = elevenUsageErr
+                    fun n(v: Long) = String.format(java.util.Locale("pl", "PL"), "%,d", v)
+                    SettingTile(Icons.Outlined.DataUsage,
+                        when {
+                            u != null -> "ElevenLabs: zostało ${n((u.limit - u.used).coerceAtLeast(0))} znaków"
+                            err != null -> "ElevenLabs: zużycie nieznane"
+                            else -> "ElevenLabs: sprawdzam zużycie…"
+                        },
+                        when {
+                            u != null -> "Wykorzystano ${n(u.used)} z ${n(u.limit)}" + (if (u.resetAt > 0) " · odnowienie " +
+                                java.text.SimpleDateFormat("d MMMM", java.util.Locale("pl", "PL")).format(java.util.Date(u.resetAt)) else "") + ". Dotknij, aby odświeżyć"
+                            err != null && "permission" in err -> "Klucz nie ma uprawnienia „User: Read” – włącz je w elevenlabs.io → API Keys i dotknij tutaj"
+                            err != null -> "$err. Dotknij, aby spróbować ponownie"
+                            else -> "Liczba znaków w bieżącym okresie rozliczeniowym"
+                        }) { elevenUsageTick++ }
+                }
                 if (elevenPaused) item {
                     SettingTile(Icons.Outlined.RestartAlt, "Spróbuj ElevenLabs ponownie", "Limit mógł się już odnowić albo doładowałeś konto") {
                         Prefs.elevenPausedUntil = 0; elevenPaused = false
@@ -541,6 +575,14 @@ fun SettingsDialog(
                     }
                     // ---- Hasło i mikrofon
                     2 -> {
+                item {
+                    val names = listOf("nie czeka", "czeka krótko", "czeka dłużej")
+                    SettingTile(Icons.Outlined.Hearing, "Pauza w zdaniu: " + names[voicePause],
+                        listOf("Okienko asystenta wysyła pytanie przy pierwszej pauzie", "Po pauzie słucha jeszcze ok. 1,5 s, czy mówisz dalej",
+                            "Po pauzie słucha jeszcze ok. 2,5 s – dla wolniejszej mowy; odpowiedź przychodzi później")[voicePause] + ". Dotknij, aby zmienić") {
+                        voicePause = (voicePause + 1) % 3; Prefs.voicePause = voicePause
+                    }
+                }
                 item {
                     val overlay = android.provider.Settings.canDrawOverlays(act)
                     SettingTile(Icons.Outlined.Mic, "Hasło głosowe („OK BMW”)",

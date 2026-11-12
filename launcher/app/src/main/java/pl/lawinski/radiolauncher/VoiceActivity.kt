@@ -38,6 +38,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -72,6 +73,40 @@ class VoiceActivity : ComponentActivity() {
     private val activity = mutableStateOf(0)
     private var recognizer: SpeechRecognizer? = null
     private var waitingLines = -1
+
+    // Dalszy ciąg zdania: rozpoznawanie Google kończy przy krótkiej pauzie, więc po wyniku słuchamy jeszcze chwilę –
+    // gdy ktoś mówi dalej, kolejne słowa są doklejane; cisza = pytanie idzie do asystenta.
+    /** to, co już rozpoznane w tym pytaniu */
+    private var collected = ""
+    /** słuchamy dalszego ciągu (po pierwszym wyniku) */
+    private var more = false
+    /** „skończ mówić” dotknięte – bez czekania na dalszy ciąg */
+    private var manualStop = false
+    private val waitHandler by lazy { android.os.Handler(mainLooper) }
+    private var waitRun: Runnable? = null
+
+    private fun pauseMs() = when (Prefs.voicePause) { 0 -> 0L; 2 -> 2600L; else -> 1600L }
+
+    private fun cancelWait() {
+        waitRun?.let { waitHandler.removeCallbacks(it) }
+        waitRun = null
+    }
+
+    /** Za [ms] bez dalszej mowy pytanie zostaje wysłane. */
+    private fun waitMore(ms: Long) {
+        cancelWait()
+        waitRun = Runnable { recognizer?.cancel(); finishQuestion() }.also { waitHandler.postDelayed(it, ms) }
+    }
+
+    private fun join(a: String, b: String) = listOf(a.trim(), b.trim()).filter { it.isNotEmpty() }.joinToString(" ")
+
+    private fun finishQuestion() {
+        cancelWait()
+        more = false
+        val t = collected.trim()
+        collected = ""
+        if (t.isNotBlank()) ask(t) else showError("Nic nie usłyszałem. Dotknij mikrofonu i powiedz jeszcze raz.")
+    }
 
     private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         if (ok) startListening() else fallbackDialog()
@@ -113,12 +148,14 @@ class VoiceActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         open = false
+        cancelWait()
         recognizer?.cancel()
         // okienko przykryła inna aplikacja (np. nawigacja włączona przez asystenta) – nie wracamy z nim
         if (!isChangingConfigurations && MainActivity.live != null) finish()
     }
 
     private fun begin() {
+        cancelWait()
         Speech.stop()
         heard.value = ""
         answer.value = ""
@@ -170,16 +207,24 @@ class VoiceActivity : ComponentActivity() {
         }
     }
 
-    private fun startListening() {
+    private fun startListening(continued: Boolean = false) {
         // mikrofon tylko dla pytania; „OK BMW” wraca, gdy skończymy słuchać (ask/showError)
         Hotword.pause()
         phase.value = Phase.LISTENING
-        heard.value = ""
+        more = continued
+        if (!continued) {
+            collected = ""
+            manualStop = false
+            heard.value = ""
+        }
         level.value = 0f
         val r = recognizer ?: SpeechRecognizer.createSpeechRecognizer(this).also { recognizer = it }
         r.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {}
-            override fun onBeginningOfSpeech() {}
+            override fun onBeginningOfSpeech() {
+                // ktoś (albo hałas) zaczął: jeszcze chwila, żeby zdążyły przyjść pierwsze słowa
+                if (more && waitRun != null) waitMore(pauseMs() + 1500)
+            }
             override fun onRmsChanged(rmsdB: Float) {
                 level.value = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
             }
@@ -188,6 +233,10 @@ class VoiceActivity : ComponentActivity() {
                 level.value = 0f
             }
             override fun onError(error: Int) {
+                // spóźnione zdarzenie po przerwaniu słuchania (pytanie już poszło albo okienko pokazuje co innego)
+                if (phase.value != Phase.LISTENING) return
+                // w czasie czekania na dalszy ciąg każdy błąd (cisza, zajęty mikrofon) = koniec pytania z tym, co już jest
+                if (more && collected.isNotBlank()) return finishQuestion()
                 when (error) {
                     SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
                         if (heard.value.isNotBlank()) ask(heard.value) else showError("Nic nie usłyszałem. Dotknij mikrofonu i powiedz jeszcze raz.")
@@ -203,12 +252,32 @@ class VoiceActivity : ComponentActivity() {
                 }
             }
             override fun onResults(results: Bundle?) {
-                val t = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                if (!t.isNullOrBlank()) ask(t) else showError("Nic nie usłyszałem. Dotknij mikrofonu i powiedz jeszcze raz.")
+                if (phase.value != Phase.LISTENING) return
+                val t = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
+                cancelWait()
+                collected = join(collected, t)
+                heard.value = collected
+                val pause = pauseMs()
+                when {
+                    collected.isBlank() -> finishQuestion()
+                    manualStop || pause == 0L -> finishQuestion()
+                    // słuchamy jeszcze chwilę, czy zdanie ma dalszy ciąg (nowy start chwilę po wyniku – inaczej „mikrofon zajęty”)
+                    else -> waitHandler.postDelayed({
+                        if (phase.value == Phase.LISTENING && !isFinishing) {
+                            startListening(continued = true)
+                            waitMore(pause)
+                        }
+                    }, 60)
+                }
             }
             override fun onPartialResults(partialResults: Bundle?) {
+                if (phase.value != Phase.LISTENING) return
                 partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                    ?.takeIf { it.isNotBlank() }?.let { heard.value = it }
+                    ?.takeIf { it.isNotBlank() }?.let {
+                        heard.value = join(collected, it)
+                        // są nowe słowa: czekamy na wynik (z zapasem, gdyby rozpoznawanie się zawiesiło)
+                        if (more) waitMore(10_000)
+                    }
             }
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
@@ -241,6 +310,7 @@ class VoiceActivity : ComponentActivity() {
     }
 
     private fun stopAndClose() {
+        cancelWait()
         recognizer?.cancel()
         finish()
     }
@@ -325,9 +395,25 @@ class VoiceActivity : ComponentActivity() {
                     )
                 }
                 Spacer(Modifier.size(16.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                     MicButton(listening = p == Phase.LISTENING, enabled = p != Phase.THINKING, accent = accent) {
-                        if (p == Phase.LISTENING) recognizer?.stopListening() else { Speech.stop(); begin() }
+                        if (p == Phase.LISTENING) {
+                            manualStop = true
+                            // w czasie czekania na dalszy ciąg nie ma na co czekać – wysyłamy to, co jest
+                            if (more && collected.isNotBlank() && waitRun != null) { recognizer?.cancel(); finishQuestion() }
+                            else recognizer?.stopListening()
+                        } else { Speech.stop(); begin() }
+                    }
+                    // odpowiedź jeszcze raz na głos (ten sam tekst gra z pamięci, bez nowego zapytania o mowę)
+                    if (p == Phase.ANSWER && a.isNotBlank()) {
+                        Spacer(Modifier.width(18.dp))
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(84.dp)) {
+                            Box(
+                                Modifier.size(60.dp).clip(CircleShape).background(Color(0x33808A99))
+                                    .clickable { activity.value++; Speech.speak(this@VoiceActivity, a) },
+                                contentAlignment = Alignment.Center,
+                            ) { Icon(Icons.Filled.Replay, "Powtórz odpowiedź", tint = Txt, modifier = Modifier.size(30.dp)) }
+                        }
                     }
                 }
             }

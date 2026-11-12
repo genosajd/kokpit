@@ -193,15 +193,25 @@ object Speech {
         speakEleven(ctx, PL_SAMPLE, voiceId)
     }
 
-    private fun speakOpenAi(ctx: Context, text: String, voice: String) = speakCloud(ctx, text, "OpenAI") { fetchOpenAi(ctx, text, voice) }
+    private fun speakOpenAi(ctx: Context, text: String, voice: String) =
+        speakCloud(ctx, text, "OpenAI", "openai|$voice|${Prefs.openaiTtsModel}|$text") { fetchOpenAi(ctx, text, voice) }
 
-    private fun speakEleven(ctx: Context, text: String, voiceId: String) = speakCloud(ctx, text, "ElevenLabs") { fetchEleven(ctx, text, voiceId) }
+    private fun speakEleven(ctx: Context, text: String, voiceId: String) =
+        speakCloud(ctx, text, "ElevenLabs", "eleven|$voiceId|${Prefs.elevenModel}|$text") { fetchEleven(ctx, text, voiceId) }
 
-    /** Głos z chmury: [fetch] pobiera plik z mową (w tle); gdy się nie uda – ten tekst czyta głos systemowy. */
-    private fun speakCloud(ctx: Context, text: String, name: String, fetch: () -> File) {
+    /** co jest w pliku z ostatnio pobraną mową (dostawca|głos|model|tekst) – to samo drugi raz gra z pliku, bez zapytania */
+    private var cachedKey = ""
+
+    /**
+     * Głos z chmury: [fetch] pobiera plik z mową (w tle); gdy się nie uda – ten tekst czyta głos systemowy.
+     * Ten sam tekst tym samym głosem po raz drugi (przycisk „powtórz”) jest odtwarzany z pliku.
+     */
+    private fun speakCloud(ctx: Context, text: String, name: String, key: String, fetch: () -> File) {
         job = scope.launch {
             val file = try {
-                withContext(Dispatchers.IO) { fetch() }
+                val ready = File(ctx.cacheDir, "tts.mp3")
+                if (key == cachedKey && ready.length() > 0) ready
+                else withContext(Dispatchers.IO) { cachedKey = ""; fetch() }.also { cachedKey = key }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: QuotaError) {
@@ -295,6 +305,17 @@ object Speech {
             ).joinToString(" · ")
             ElevenVoice(v.getString("voice_id"), v.optString("name").ifBlank { "głos ${i + 1}" }, info)
         }
+    }
+
+    /** Zużycie na koncie ElevenLabs w bieżącym okresie: wykorzystane znaki, limit, czas odnowienia (ms; 0 = nieznany). */
+    class ElevenUsage(val used: Long, val limit: Long, val resetAt: Long)
+
+    /** Wołać poza wątkiem głównym. Klucz musi mieć dostęp do danych konta. */
+    fun elevenUsage(): ElevenUsage {
+        val c = elevenOpen("/v1/user/subscription", post = false)
+        if (c.responseCode !in 200..299) elevenFail(c)
+        val o = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
+        return ElevenUsage(o.optLong("character_count"), o.optLong("character_limit"), o.optLong("next_character_count_reset_unix") * 1000)
     }
 
     private fun fetchEleven(ctx: Context, text: String, voiceId: String): File {
