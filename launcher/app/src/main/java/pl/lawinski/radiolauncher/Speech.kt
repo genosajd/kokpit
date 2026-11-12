@@ -25,12 +25,34 @@ import java.util.Locale
  *  - SYSTEM: silnik mowy Androida (Google); głos polski do wyboru, „sieciowe” brzmią najnaturalniej.
  *  - OPENAI: głos z OpenAI (/v1/audio/speech) – najbardziej ludzki, płatny, potrzebuje klucza OpenAI.
  *    Gdy się nie uda (brak sieci, zły klucz), odpowiedź czyta głos systemowy.
+ *  - ELEVEN: głos z ElevenLabs (/v1/text-to-speech/{głos}) – własny klucz, głosy z konta właściciela (także
+ *    sklonowane), płatny według liczby znaków. Błąd = ta odpowiedź głosem systemowym; wyczerpany limit znaków =
+ *    ElevenLabs pomijany przez kilka godzin (bez czekania na odmowę przy każdej odpowiedzi), potem wraca sam.
  * Na czas czytania muzyka jest ściszana (fokus audio „transient may duck” – system ścisza inne odtwarzacze).
  */
 object Speech {
     const val SYSTEM = "system"
     const val OPENAI = "openai"
+    const val ELEVEN = "eleven"
     const val DEFAULT_OPENAI_TTS_MODEL = "gpt-4o-mini-tts"
+
+    /** Modele ElevenLabs: id z API i nazwa w Ustawieniach (pierwszy = domyślny). */
+    val ELEVEN_MODELS = listOf(
+        "eleven_flash_v2_5" to "szybki",
+        "eleven_multilingual_v2" to "dokładny",
+        "eleven_v3" to "ekspresyjny",
+    )
+
+    /** Po wyczerpaniu limitu znaków ElevenLabs: tyle czasu czyta głos systemowy, potem kolejna próba. */
+    private const val ELEVEN_PAUSE_MS = 6 * 60 * 60 * 1000L
+
+    class ElevenVoice(val id: String, val name: String, val info: String)
+
+    /** Limit znaków na koncie ElevenLabs wyczerpany. */
+    private class QuotaError(message: String) : Exception(message)
+
+    /** Czy ElevenLabs jest teraz pomijany po wyczerpaniu limitu. */
+    fun elevenPaused() = System.currentTimeMillis() < Prefs.elevenPausedUntil
     const val DEFAULT_OPENAI_VOICE = "coral"
 
     /** Głosy OpenAI do wyboru (nazwy z API). */
@@ -135,8 +157,11 @@ object Speech {
         val clean = text.replace(Regex("[*_#`>|]"), "").replace(Regex("\\s+"), " ").trim()
         if (clean.isEmpty()) return
         stop(keepDuck = true)
-        if (Prefs.ttsEngine == OPENAI && Prefs.openaiKey.isNotBlank()) speakOpenAi(ctx, clean, Prefs.openaiVoice)
-        else speakSystem(ctx, clean)
+        when {
+            Prefs.ttsEngine == OPENAI && Prefs.openaiKey.isNotBlank() -> speakOpenAi(ctx, clean, Prefs.openaiVoice)
+            Prefs.ttsEngine == ELEVEN && Prefs.elevenKey.isNotBlank() && !elevenPaused() -> speakEleven(ctx, clean, Prefs.elevenVoice)
+            else -> speakSystem(ctx, clean)
+        }
     }
 
     private fun speakSystem(ctx: Context, text: String) = system(ctx) {
@@ -163,12 +188,29 @@ object Speech {
         applyVoice()
     }
 
-    private fun speakOpenAi(ctx: Context, text: String, voice: String) {
+    fun previewEleven(ctx: Context, voiceId: String) {
+        stop()
+        speakEleven(ctx, PL_SAMPLE, voiceId)
+    }
+
+    private fun speakOpenAi(ctx: Context, text: String, voice: String) = speakCloud(ctx, text, "OpenAI") { fetchOpenAi(ctx, text, voice) }
+
+    private fun speakEleven(ctx: Context, text: String, voiceId: String) = speakCloud(ctx, text, "ElevenLabs") { fetchEleven(ctx, text, voiceId) }
+
+    /** Głos z chmury: [fetch] pobiera plik z mową (w tle); gdy się nie uda – ten tekst czyta głos systemowy. */
+    private fun speakCloud(ctx: Context, text: String, name: String, fetch: () -> File) {
         job = scope.launch {
             val file = try {
-                withContext(Dispatchers.IO) { fetchOpenAi(ctx, text, voice) }
+                withContext(Dispatchers.IO) { fetch() }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: QuotaError) {
+                Prefs.elevenPausedUntil = System.currentTimeMillis() + ELEVEN_PAUSE_MS
+                android.widget.Toast.makeText(ctx, "Limit ElevenLabs wyczerpany – przez kilka godzin czytam głosem systemowym", android.widget.Toast.LENGTH_LONG).show()
+                speakSystem(ctx, text)
+                return@launch
             } catch (e: Exception) {
-                android.widget.Toast.makeText(ctx, "Głos OpenAI nie działa (${e.message}) – czytam głosem systemowym", android.widget.Toast.LENGTH_LONG).show()
+                android.widget.Toast.makeText(ctx, "Głos $name nie działa (${e.message}) – czytam głosem systemowym", android.widget.Toast.LENGTH_LONG).show()
                 speakSystem(ctx, text)
                 return@launch
             }
@@ -204,6 +246,69 @@ object Speech {
             val err = c.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
             throw Exception(runCatching { JSONObject(err).getJSONObject("error").optString("message") }.getOrNull()?.take(80) ?: "HTTP ${c.responseCode}")
         }
+        val f = File(ctx.cacheDir, "tts.mp3")
+        c.inputStream.use { inp -> f.outputStream().use { inp.copyTo(it) } }
+        return f
+    }
+
+    // ---------- ElevenLabs ----------
+
+    private fun elevenOpen(path: String, post: Boolean): HttpURLConnection {
+        val c = URL("https://api.elevenlabs.io$path").openConnection() as HttpURLConnection
+        c.connectTimeout = 10000
+        c.readTimeout = 60000
+        c.setRequestProperty("xi-api-key", Prefs.elevenKey)
+        if (post) {
+            c.requestMethod = "POST"
+            c.doOutput = true
+            c.setRequestProperty("Content-Type", "application/json")
+        }
+        return c
+    }
+
+    /** Odpowiedź z błędem: {"detail": {"status": …, "message": …}} albo {"detail": "tekst"}. */
+    private fun elevenFail(c: HttpURLConnection): Nothing {
+        val err = c.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+        val detail = runCatching { JSONObject(err).opt("detail") }.getOrNull()
+        val status = (detail as? JSONObject)?.optString("status").orEmpty()
+        val msg = ((detail as? JSONObject)?.optString("message") ?: detail as? String).orEmpty().ifBlank { "HTTP ${c.responseCode}" }.take(90)
+        if (status == "quota_exceeded" || "quota" in msg.lowercase()) throw QuotaError(msg)
+        throw Exception(msg)
+    }
+
+    /** Głosy z konta ElevenLabs właściciela (gotowe, własne, sklonowane). Wołać poza wątkiem głównym. */
+    fun elevenVoices(): List<ElevenVoice> {
+        val c = elevenOpen("/v1/voices", post = false)
+        if (c.responseCode !in 200..299) elevenFail(c)
+        val a = JSONObject(c.inputStream.bufferedReader().use { it.readText() }).optJSONArray("voices") ?: return emptyList()
+        return (0 until a.length()).map { i ->
+            val v = a.getJSONObject(i)
+            val labels = v.optJSONObject("labels")
+            val info = listOfNotNull(
+                when (v.optString("category")) { "cloned" -> "sklonowany"; "generated" -> "własny"; "professional" -> "profesjonalny"; else -> null },
+                labels?.optString("gender")?.takeIf { it.isNotBlank() },
+                labels?.optString("age")?.takeIf { it.isNotBlank() },
+                labels?.optString("accent")?.takeIf { it.isNotBlank() },
+                labels?.optString("description")?.takeIf { it.isNotBlank() },
+            ).joinToString(" · ")
+            ElevenVoice(v.getString("voice_id"), v.optString("name").ifBlank { "głos ${i + 1}" }, info)
+        }
+    }
+
+    private fun fetchEleven(ctx: Context, text: String, voiceId: String): File {
+        // bez wybranego głosu: pierwszy z konta (i zapamiętany)
+        val voice = voiceId.ifBlank {
+            val first = elevenVoices().firstOrNull() ?: throw Exception("brak głosów na koncie")
+            Prefs.elevenVoice = first.id; Prefs.elevenVoiceName = first.name
+            first.id
+        }
+        val model = Prefs.elevenModel
+        val c = elevenOpen("/v1/text-to-speech/" + java.net.URLEncoder.encode(voice, "UTF-8") + "?output_format=mp3_44100_128", post = true)
+        val body = JSONObject().put("text", text).put("model_id", model)
+        // wskazanie języka przyjmują tylko modele 2.5 – bez niego krótkie polskie zdania bywają czytane z obcym akcentem
+        if (model.endsWith("_v2_5")) body.put("language_code", "pl")
+        c.outputStream.use { it.write(body.toString().toByteArray()) }
+        if (c.responseCode !in 200..299) elevenFail(c)
         val f = File(ctx.cacheDir, "tts.mp3")
         c.inputStream.use { inp -> f.outputStream().use { inp.copyTo(it) } }
         return f

@@ -219,6 +219,28 @@ object Prefs {
     var openaiTtsModel: String
         get() = sp.getString("openai_tts_model", "")?.ifBlank { null } ?: Speech.DEFAULT_OPENAI_TTS_MODEL
         set(v) = sp.edit().putString("openai_tts_model", v).apply()
+    /** ElevenLabs (Speech.ELEVEN): klucz API (tylko w radiu), wybrany głos (id i nazwa), model */
+    var elevenKey: String
+        get() = sp.getString("eleven_key", "") ?: ""
+        set(v) = sp.edit().putString("eleven_key", v).apply()
+    var elevenVoice: String
+        get() = sp.getString("eleven_voice", "") ?: ""
+        set(v) = sp.edit().putString("eleven_voice", v).apply()
+    var elevenVoiceName: String
+        get() = sp.getString("eleven_voice_name", "") ?: ""
+        set(v) = sp.edit().putString("eleven_voice_name", v).apply()
+    var elevenModel: String
+        get() = sp.getString("eleven_model", "")?.ifBlank { null } ?: Speech.ELEVEN_MODELS[0].first
+        set(v) = sp.edit().putString("eleven_model", v).apply()
+    /** do kiedy (czas zegara, ms) ElevenLabs jest pomijany po wyczerpaniu limitu znaków – czyta głos systemowy */
+    var elevenPausedUntil: Long
+        get() = sp.getLong("eleven_paused_until", 0)
+        set(v) = sp.edit().putLong("eleven_paused_until", v).apply()
+    /** zakładka w Ustawienia → Asystent AI */
+    var aiTab: Int
+        get() = sp.getInt("settings_ai_tab", 0)
+        set(v) = sp.edit().putInt("settings_ai_tab", v).apply()
+
     /** Własne instrukcje dla asystenta (dopisywane do promptu systemowego) */
     var aiInstructions: String
         get() = sp.getString("ai_instructions", "") ?: ""

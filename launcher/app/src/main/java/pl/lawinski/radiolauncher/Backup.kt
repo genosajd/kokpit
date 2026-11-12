@@ -39,11 +39,11 @@ object Backup {
     private const val MARK = "kokpit_ustawienia"
 
     /** klucze API i tokeny – eksportowane tylko na wyraźne życzenie */
-    val SECRET = setOf("anthropic_key", "openai_key", "tuya_id", "tuya_secret", "slack_token", "google_key")
+    val SECRET = setOf("anthropic_key", "openai_key", "tuya_id", "tuya_secret", "slack_token", "google_key", "eleven_key")
 
     /** stan tego jednego radia, bez sensu w innym: numery widżetów Androida, stan chwilowy */
     private fun local(key: String) = key == "camera_widget" || key.startsWith("block_widget") ||
-        key == "nav_popups_hidden" || key == "settings_group" || key == "car_model"
+        key == "nav_popups_hidden" || key == "settings_group" || key == "settings_ai_tab" || key == "eleven_paused_until" || key == "car_model"
 
     fun export(withSecrets: Boolean, version: String): String {
         val prefs = JSONObject()

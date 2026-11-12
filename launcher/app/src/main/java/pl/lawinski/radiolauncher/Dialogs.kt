@@ -230,6 +230,9 @@ fun SettingsDialog(
     if (phraseDlg) HotwordPhraseDialog { phraseDlg = false; phrase = Prefs.hotwordPhrase }
     var tokenLimit by remember { mutableStateOf(Prefs.aiTokenLimit) }
     val ttsEngine = Prefs.ttsEngine
+    var aiTab by remember { mutableStateOf(Prefs.aiTab.coerceIn(0, AI_TABS.size - 1)) }
+    var elevenModel by remember { mutableStateOf(Prefs.elevenModel) }
+    var elevenPaused by remember { mutableStateOf(Speech.elevenPaused()) }
     var group by remember { mutableStateOf(Prefs.settingsGroup.coerceIn(0, SETTINGS_GROUPS.size - 1)) }
 
     Sheet("Ustawienia", onClose, widthFraction = 0.94f) {
@@ -443,6 +446,27 @@ fun SettingsDialog(
                     }
                     7 -> {
                 val claude = aiProvider == Assistant.ANTHROPIC
+                // zakładki: kafelków asystenta jest dużo, więc są podzielone na cztery grupy
+                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(d(12))) {
+                        AI_TABS.forEachIndexed { i, (title, icon) ->
+                            val on = i == aiTab
+                            Row(
+                                Modifier.kokpitSurface(d(16), fill = on, active = on)
+                                    .combinedClickable(onClick = { aiTab = i; Prefs.aiTab = i })
+                                    .padding(horizontal = d(22), vertical = d(14)),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(icon, null, tint = if (on) LocalTheme.current.activeText else Accent, modifier = Modifier.size(d(28)))
+                                Spacer(Modifier.width(d(12)))
+                                Text(title, color = if (on) LocalTheme.current.activeText else Txt, fontSize = s(22), fontWeight = if (on) FontWeight.Medium else FontWeight.Normal)
+                            }
+                        }
+                    }
+                }
+                when (aiTab) {
+                    // ---- Rozmowa: dostawca, klucz, model, instrukcje, limit
+                    0 -> {
                 item {
                     SettingTile(Icons.Outlined.SmartToy, "Dostawca: " + if (claude) "Anthropic (Claude)" else "OpenAI", "Dotknij, aby zmienić na " + if (claude) "OpenAI" else "Anthropic (Claude)") {
                         aiProvider = if (claude) Assistant.OPENAI else Assistant.ANTHROPIC
@@ -467,10 +491,56 @@ fun SettingsDialog(
                         if (own.isEmpty()) "Np. jak ma się do Ciebie zwracać, jakim tonem mówić" else own.replace('\n', ' ').take(80)) { onInstructions() }
                 }
                 item {
+                    SettingTile(Icons.Outlined.DataUsage, "Limit rozmowy: ${tokensText(tokenLimit.toLong())} tokenów",
+                        "Rozmowa zostaje po restarcie radia; po przekroczeniu limitu zaczyna się nowa. Teraz: ${tokensText(Assistant.tokens.value)}. Dotknij, aby zmienić") {
+                        val all = listOf(50_000, 100_000, 200_000, 500_000, 800_000)
+                        tokenLimit = all[(all.indexOf(tokenLimit) + 1) % all.size]; Prefs.aiTokenLimit = tokenLimit
+                    }
+                }
+                item { SettingTile(Icons.Outlined.RestartAlt, "Nowa rozmowa", "Asystent zapomni dotychczasową rozmowę") { Assistant.reset() } }
+                    }
+                    // ---- Głos: czytanie odpowiedzi, wybór głosu, ElevenLabs
+                    1 -> {
+                item {
                     SettingTile(Icons.Outlined.RecordVoiceOver, "Czytaj odpowiedzi na głos", if (aiSpeak) "Odpowiedzi czytane po polsku" else "Odpowiedzi tylko na ekranie", on = aiSpeak) {
                         aiSpeak = !aiSpeak; Prefs.aiSpeak = aiSpeak
                     }
                 }
+                item {
+                    val paused = elevenPaused
+                    SettingTile(Icons.Outlined.GraphicEq, "Głos: " + when (ttsEngine) {
+                        Speech.OPENAI -> "OpenAI (${Prefs.openaiVoice})"
+                        Speech.ELEVEN -> "ElevenLabs (${Prefs.elevenVoiceName.ifBlank { "pierwszy z konta" }})"
+                        else -> "Google w radiu"
+                    }, when {
+                        ttsEngine == Speech.ELEVEN && Prefs.elevenKey.isBlank() -> "Brak klucza ElevenLabs – czyta głos Google w radiu"
+                        ttsEngine == Speech.ELEVEN && paused -> "Limit ElevenLabs wyczerpany – do " +
+                            java.text.SimpleDateFormat("HH:mm", java.util.Locale("pl", "PL")).format(java.util.Date(Prefs.elevenPausedUntil)) + " czyta głos Google w radiu"
+                        ttsEngine == Speech.SYSTEM -> "Dotknij, aby wybrać głos Google, OpenAI albo ElevenLabs"
+                        else -> "Płatny według długości tekstu. Dotknij, aby wybrać inny"
+                    }) { onVoices() }
+                }
+                item {
+                    val key = Prefs.elevenKey
+                    SettingTile(Icons.Outlined.Key, "Klucz ElevenLabs",
+                        if (key.isBlank()) "Nie wpisano – elevenlabs.io → Developers → API Keys" else "Wpisany: …" + key.takeLast(4),
+                        on = key.isNotBlank()) { onAiField(AiField.ELEVEN_KEY) }
+                }
+                if (Prefs.elevenKey.isNotBlank()) item {
+                    val idx = Speech.ELEVEN_MODELS.indexOfFirst { it.first == elevenModel }.coerceAtLeast(0)
+                    SettingTile(Icons.Outlined.Tune, "Model ElevenLabs: " + Speech.ELEVEN_MODELS[idx].second,
+                        listOf("Najmniejsze opóźnienie – dobry do auta", "Lepsza intonacja, odpowiada wolniej", "Najbardziej żywy, najwolniejszy")[idx] + ". Dotknij, aby zmienić") {
+                        elevenModel = Speech.ELEVEN_MODELS[(idx + 1) % Speech.ELEVEN_MODELS.size].first; Prefs.elevenModel = elevenModel
+                    }
+                }
+                if (elevenPaused) item {
+                    SettingTile(Icons.Outlined.RestartAlt, "Spróbuj ElevenLabs ponownie", "Limit mógł się już odnowić albo doładowałeś konto") {
+                        Prefs.elevenPausedUntil = 0; elevenPaused = false
+                    }
+                }
+                    }
+                    // ---- Hasło i mikrofon
+                    2 -> {
                 item {
                     val overlay = android.provider.Settings.canDrawOverlays(act)
                     SettingTile(Icons.Outlined.Mic, "Hasło głosowe („OK BMW”)",
@@ -533,19 +603,9 @@ fun SettingsDialog(
                         Hotword.restart()
                     }
                 }
-                item {
-                    val oa = ttsEngine == Speech.OPENAI
-                    SettingTile(Icons.Outlined.GraphicEq, "Głos: " + if (oa) "OpenAI (${Prefs.openaiVoice})" else "Google w radiu",
-                        if (oa) "Najbardziej ludzki; płatny, klucz OpenAI. Dotknij, aby wybrać" else "Dotknij, aby wybrać głos albo OpenAI") { onVoices() }
-                }
-                item {
-                    SettingTile(Icons.Outlined.DataUsage, "Limit rozmowy: ${tokensText(tokenLimit.toLong())} tokenów",
-                        "Rozmowa zostaje po restarcie radia; po przekroczeniu limitu zaczyna się nowa. Teraz: ${tokensText(Assistant.tokens.value)}. Dotknij, aby zmienić") {
-                        val all = listOf(50_000, 100_000, 200_000, 500_000, 800_000)
-                        tokenLimit = all[(all.indexOf(tokenLimit) + 1) % all.size]; Prefs.aiTokenLimit = tokenLimit
                     }
-                }
-                item { SettingTile(Icons.Outlined.RestartAlt, "Nowa rozmowa", "Asystent zapomni dotychczasową rozmowę") { Assistant.reset() } }
+                    // ---- Dostępy: Slack i przełączniki tego, z czego asystent może korzystać
+                    else -> {
                 item {
                     val token = Prefs.slackToken
                     SettingTile(Icons.Outlined.Key, "Slack",
@@ -562,6 +622,8 @@ fun SettingsDialog(
                         @Suppress("UNUSED_VARIABLE") val v = Access.version.value
                         val on = Access.enabled(g.id)
                         SettingTile(g.icon, g.title, if (on) g.description else "Zablokowane", on = on) { Access.set(g.id, !on) }
+                    }
+                }
                     }
                 }
                     }
@@ -754,7 +816,7 @@ private fun Swatch(color: Long?, selected: Boolean, label: String?, onClick: () 
     }
 }
 
-/** Wybór głosu odpowiedzi: polskie głosy systemowe (Google) albo głosy OpenAI, z odsłuchem. */
+/** Wybór głosu odpowiedzi: polskie głosy systemowe (Google), głosy OpenAI albo ElevenLabs, z odsłuchem. */
 @Composable
 fun VoicePickerDialog(act: MainActivity, onClose: () -> Unit) {
     var engine by remember { mutableStateOf(Prefs.ttsEngine) }
@@ -762,6 +824,19 @@ fun VoicePickerDialog(act: MainActivity, onClose: () -> Unit) {
     var oaVoice by remember { mutableStateOf(Prefs.openaiVoice) }
     var voices by remember { mutableStateOf<List<android.speech.tts.Voice>?>(null) }
     LaunchedEffect(Unit) { Speech.polishVoices(act) { voices = it } }
+    var elVoice by remember { mutableStateOf(Prefs.elevenVoice) }
+    var elVoices by remember { mutableStateOf<List<Speech.ElevenVoice>?>(null) }
+    var elErr by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        if (Prefs.elevenKey.isBlank()) return@LaunchedEffect
+        try {
+            elVoices = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Speech.elevenVoices() }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            elErr = e.message ?: e.javaClass.simpleName
+        }
+    }
     androidx.compose.runtime.DisposableEffect(Unit) { onDispose { Speech.stop() } }
     Sheet("Głos odpowiedzi", { Speech.stop(); onClose() }) {
         LazyVerticalGrid(
@@ -799,6 +874,28 @@ fun VoicePickerDialog(act: MainActivity, onClose: () -> Unit) {
                     engine = Speech.OPENAI; oaVoice = v
                     Prefs.ttsEngine = Speech.OPENAI; Prefs.openaiVoice = v
                     Speech.previewOpenAi(act, v)
+                }
+            }
+            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                Text(
+                    when {
+                        Prefs.elevenKey.isBlank() -> "ElevenLabs – głosy z Twojego konta (także sklonowane); najpierw wpisz klucz w Ustawienia → Asystent AI → Głos"
+                        elErr != null -> "ElevenLabs – nie udało się pobrać głosów: $elErr"
+                        elVoices == null -> "ElevenLabs – wczytywanie głosów…"
+                        else -> "ElevenLabs – głosy z Twojego konta, płatne według liczby znaków (odsłuch też zużywa znaki)"
+                    },
+                    color = if (elErr != null) Warn else Dim, fontSize = s(20), modifier = Modifier.padding(top = d(10)),
+                )
+            }
+            elVoices?.let { el ->
+                items(el.size) { i ->
+                    val v = el[i]
+                    SettingTile(Icons.Outlined.GraphicEq, "ElevenLabs: ${v.name}", v.info.ifBlank { "Dotknij, aby odsłuchać i wybrać" },
+                        on = engine == Speech.ELEVEN && elVoice == v.id) {
+                        engine = Speech.ELEVEN; elVoice = v.id
+                        Prefs.ttsEngine = Speech.ELEVEN; Prefs.elevenVoice = v.id; Prefs.elevenVoiceName = v.name
+                        Speech.previewEleven(act, v.id)
+                    }
                 }
             }
         }
@@ -880,6 +977,14 @@ fun HotwordPhraseDialog(onClose: () -> Unit) {
     )
 }
 
+/** Zakładki w Ustawienia → Asystent AI. */
+private val AI_TABS = listOf(
+    "Rozmowa" to Icons.Outlined.SmartToy,
+    "Głos" to Icons.Outlined.RecordVoiceOver,
+    "Hasło i mikrofon" to Icons.Outlined.Mic,
+    "Dostępy" to Icons.Outlined.Key,
+)
+
 /** Pola asystenta wpisywane w okienku. */
 enum class AiField(val title: String, val hint: String, val secret: Boolean) {
     ANTHROPIC_KEY("Klucz API Anthropic", "sk-ant-…", true),
@@ -890,6 +995,7 @@ enum class AiField(val title: String, val hint: String, val secret: Boolean) {
     TUYA_SECRET("Tuya Access Secret", "z projektu na platform.tuya.com", true),
     SLACK_TOKEN("Slack: User OAuth Token", "xoxp-…", true),
     GOOGLE_KEY("Klucz Google Maps Platform", "AIza…", true),
+    ELEVEN_KEY("Klucz API ElevenLabs", "sk_…", true),
 }
 
 /** Wpisanie klucza API albo nazwy modelu asystenta; puste pole modelu = domyślny. */
@@ -906,6 +1012,7 @@ fun AiFieldDialog(field: AiField, onClose: () -> Unit) {
                 AiField.TUYA_SECRET -> Prefs.tuyaSecret
                 AiField.SLACK_TOKEN -> Prefs.slackToken
                 AiField.GOOGLE_KEY -> Prefs.googleKey
+                AiField.ELEVEN_KEY -> Prefs.elevenKey
             }
         )
     }
@@ -929,6 +1036,7 @@ fun AiFieldDialog(field: AiField, onClose: () -> Unit) {
                         field == AiField.TUYA_ID || field == AiField.TUYA_SECRET -> "Projekt „Kokpit F11” → Overview → Authorization Key. Zostaje tylko w radiu."
                         field == AiField.SLACK_TOKEN -> "api.slack.com/apps → Kokpit F11 → OAuth & Permissions → User OAuth Token. Zostaje tylko w radiu."
                         field == AiField.GOOGLE_KEY -> "console.cloud.google.com → projekt z włączonymi „Places API (New)” i „Routes API” → Dane logowania → klucz API. Zostaje tylko w radiu; płatne według zużycia ponad darmowy limit Google."
+                        field == AiField.ELEVEN_KEY -> "elevenlabs.io → Developers → API Keys. Klucz potrzebuje dostępu do zamiany tekstu na mowę i do listy głosów. Zostaje tylko w radiu; płatne według liczby znaków."
                         field.secret -> "Klucz zostaje tylko w radiu. Za zapytania płacisz u dostawcy według zużycia."
                         else -> "Puste pole = model domyślny (${field.hint})."
                     },
@@ -947,6 +1055,7 @@ fun AiFieldDialog(field: AiField, onClose: () -> Unit) {
                     AiField.TUYA_SECRET -> { Prefs.tuyaSecret = text; Tuya.reset() }
                     AiField.SLACK_TOKEN -> { Prefs.slackToken = text; Slack.reset() }
                     AiField.GOOGLE_KEY -> Prefs.googleKey = text
+                    AiField.ELEVEN_KEY -> { Prefs.elevenKey = text; Prefs.elevenPausedUntil = 0 }
                 }
                 Assistant.reset()
                 onClose()
