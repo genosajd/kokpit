@@ -1446,7 +1446,7 @@ fun AssistantBlock(modifier: Modifier, slot: Slot, act: MainActivity, onSettings
                     Modifier.size(d(64)).kokpitSurface(d(16), active = input.isBlank()).combinedClickable(onClick = {
                         act.stopSpeaking()
                         if (!Assistant.hasKey()) onSettings()
-                        else if (!act.listen { Assistant.send(act, it) }) android.widget.Toast.makeText(act, "Radio nie ma rozpoznawania mowy (Google)", android.widget.Toast.LENGTH_LONG).show()
+                        else VoiceActivity.start(act) // to samo okienko co przycisk na kierownicy i „OK BMW” (samo sięga po okienko Google, gdy trzeba)
                     }),
                     contentAlignment = Alignment.Center,
                 ) { Icon(Icons.Outlined.Mic, "Mów", tint = if (input.isBlank()) LocalTheme.current.activeText else Accent, modifier = Modifier.size(d(34))) }
