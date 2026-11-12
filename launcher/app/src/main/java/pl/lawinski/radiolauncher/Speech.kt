@@ -273,6 +273,8 @@ object Speech {
         val status = (detail as? JSONObject)?.optString("status").orEmpty()
         val msg = ((detail as? JSONObject)?.optString("message") ?: detail as? String).orEmpty().ifBlank { "HTTP ${c.responseCode}" }.take(90)
         if (status == "quota_exceeded" || "quota" in msg.lowercase()) throw QuotaError(msg)
+        // darmowe konto: głosy dodane z biblioteki głosów nie działają przez API
+        if ("library voices" in msg.lowercase()) throw Exception("ten głos jest z biblioteki głosów – w darmowym planie wybierz głos bez dopisku „z biblioteki”")
         throw Exception(msg)
     }
 
@@ -285,7 +287,7 @@ object Speech {
             val v = a.getJSONObject(i)
             val labels = v.optJSONObject("labels")
             val info = listOfNotNull(
-                when (v.optString("category")) { "cloned" -> "sklonowany"; "generated" -> "własny"; "professional" -> "profesjonalny"; else -> null },
+                when (v.optString("category")) { "cloned" -> "sklonowany"; "generated" -> "własny"; "professional" -> "z biblioteki (płatny plan)"; else -> null },
                 labels?.optString("gender")?.takeIf { it.isNotBlank() },
                 labels?.optString("age")?.takeIf { it.isNotBlank() },
                 labels?.optString("accent")?.takeIf { it.isNotBlank() },
