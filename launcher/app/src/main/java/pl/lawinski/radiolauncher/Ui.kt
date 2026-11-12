@@ -183,8 +183,6 @@ sealed interface Dlg {
     data class TuyaDevices(val n: Int) : Dlg
 }
 
-/** Edycja układu tylko na postoju: powyżej tej prędkości z GPS przycisk jest nieaktywny. */
-const val EDIT_MAX_KMH = 5
 
 @Composable
 fun LauncherScreen(act: MainActivity) {
@@ -194,14 +192,12 @@ fun LauncherScreen(act: MainActivity) {
     var dialog by remember { mutableStateOf<Dlg?>(null) }
     var edit by remember { mutableStateOf(false) }
     var demo by remember { mutableStateOf(false) }
-    val speed by act.location.speedKmh.collectAsState()
 
     LaunchedEffect(apps) { shortcuts = Prefs.shortcuts }
     LaunchedEffect(act.homePressed.intValue) {
         dialog = null
         edit = false
     }
-    LaunchedEffect(speed) { if ((speed ?: 0) > EDIT_MAX_KMH) edit = false }
     // pokaz danych auta: paliwo i kolejno otwierane drzwi; po wyłączeniu wracają dane z CAN
     LaunchedEffect(demo) {
         CanSource.demo = demo
@@ -269,8 +265,7 @@ fun LauncherScreen(act: MainActivity) {
                     } else {
                         StatusBar(
                             onSettings = { dialog = Dlg.Settings },
-                            onEdit = { if ((speed ?: 0) <= EDIT_MAX_KMH) edit = true },
-                            editAllowed = (speed ?: 0) <= EDIT_MAX_KMH,
+                            onEdit = { edit = true },
                         )
                     }
                     Box(Modifier.weight(1f).fillMaxWidth().padding(top = d(8), bottom = d(28))) {
@@ -495,7 +490,7 @@ fun Pill(icon: ImageVector?, text: String, color: Color = Txt, active: Boolean =
 // ---------- pasek stanu ----------
 
 @Composable
-fun StatusBar(onSettings: () -> Unit, onEdit: () -> Unit, editAllowed: Boolean) {
+fun StatusBar(onSettings: () -> Unit, onEdit: () -> Unit) {
     val now by produceState(Date()) {
         while (true) {
             value = Date()
@@ -527,7 +522,7 @@ fun StatusBar(onSettings: () -> Unit, onEdit: () -> Unit, editAllowed: Boolean) 
         val ctx = LocalContext.current
         Pill(Icons.Outlined.Tune, "Radio", onClick = { openRadioSettings(ctx) })
         Spacer(Modifier.width(d(14)))
-        Pill(Icons.Outlined.DashboardCustomize, "Układ", color = if (editAllowed) Txt else Dim, onClick = onEdit)
+        Pill(Icons.Outlined.DashboardCustomize, "Układ", onClick = onEdit)
         Spacer(Modifier.width(d(14)))
         Pill(Icons.Outlined.Settings, "Ustawienia", onClick = onSettings)
     }
