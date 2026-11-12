@@ -325,6 +325,15 @@ fun SettingsDialog(
                         open(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
                     }
                 }
+                // aplikacja nawigacji bez zgody na powiadomienia: prowadzi, ale blok Nawigacja nic nie dostaje
+                NavListener.blockedApps(act).forEach { (pkg, label) ->
+                    item {
+                        SettingTile(Icons.Outlined.Navigation, "$label: powiadomienia wyłączone",
+                            "Bez nich wskazówki nie pokażą się w bloku Nawigacja. Dotknij i włącz powiadomienia tej aplikacji") {
+                            NavListener.openAppNotifications(act, pkg)
+                        }
+                    }
+                }
                 item {
                     val auto = remember(tick) { NavPopups.canAuto(act) }
                     var hide by remember { mutableStateOf(Prefs.hideNavPopups) }

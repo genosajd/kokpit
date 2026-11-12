@@ -994,6 +994,8 @@ fun SmallAppIcon(app: AppEntry?) {
 fun NavBlock(modifier: Modifier, slot: Slot, act: MainActivity, onAddress: (Boolean) -> Unit, onPlace3: () -> Unit) {
     val nav by NavState.info.collectAsState()
     val listenerOn = remember(act.resumeTick.intValue) { NavListener.isEnabled(act) }
+    // aplikacje nawigacji bez zgody na powiadomienia – wtedy wskazówki nigdy tu nie dotrą
+    val blocked = remember(act.resumeTick.intValue, nav == null) { if (listenerOn) NavListener.blockedApps(act) else emptyList() }
     val compact = slot.h == 1
     Block(modifier) {
         Column(Modifier.fillMaxSize().padding(d(26))) {
@@ -1025,7 +1027,16 @@ fun NavBlock(modifier: Modifier, slot: Slot, act: MainActivity, onAddress: (Bool
                     }
                 }
             } else {
-                Text("Brak aktywnej trasy", color = Dim, fontSize = s(22), modifier = Modifier.padding(top = d(if (compact) 14 else 30)))
+                if (blocked.isEmpty() || !compact) Text("Brak aktywnej trasy", color = Dim, fontSize = s(22), modifier = Modifier.padding(top = d(if (compact) 14 else 30)))
+                blocked.forEach { (pkg, label) ->
+                    if (!compact) Text("$label: wyłączone powiadomienia, więc wskazówki się tu nie pokażą", color = Warn, fontSize = s(20),
+                        modifier = Modifier.padding(top = d(14)))
+                    Text(
+                        "Włącz powiadomienia: $label",
+                        color = Accent, fontSize = s(20), maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = d(if (compact) 14 else 10)).combinedClickable(onClick = { NavListener.openAppNotifications(act, pkg) }),
+                    )
+                }
                 if (!listenerOn) {
                     Text(
                         "Włącz podgląd trasy",

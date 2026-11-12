@@ -89,6 +89,33 @@ class NavListener : NotificationListenerService() {
 
         fun isEnabled(ctx: Context): Boolean =
             NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
+
+        /**
+         * Zainstalowane aplikacje nawigacji, którym system nie pozwala pokazywać powiadomień (Android 13+:
+         * zgoda POST_NOTIFICATIONS – wystarczy raz odmówić przy pierwszej trasie). Bez powiadomienia
+         * blok Nawigacja nie dostaje wskazówek, choć aplikacja prowadzi normalnie. Para: pakiet i nazwa.
+         */
+        fun blockedApps(ctx: Context): List<Pair<String, String>> {
+            if (android.os.Build.VERSION.SDK_INT < 33) return emptyList()
+            val pm = ctx.packageManager
+            return NAV_APPS.mapNotNull { pkg ->
+                try {
+                    val info = pm.getApplicationInfo(pkg, 0)
+                    if (!info.enabled || pm.checkPermission("android.permission.POST_NOTIFICATIONS", pkg) == android.content.pm.PackageManager.PERMISSION_GRANTED) null
+                    else pkg to pm.getApplicationLabel(info).toString()
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        }
+
+        /** Ekran systemowy z powiadomieniami aplikacji [pkg]. */
+        fun openAppNotifications(ctx: Context, pkg: String) {
+            runCatching {
+                ctx.startActivity(Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, pkg).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+        }
     }
 }
 
