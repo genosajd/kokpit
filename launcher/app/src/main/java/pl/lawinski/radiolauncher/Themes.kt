@@ -273,21 +273,54 @@ object Swatches {
 
 private fun Color.dim(f: Float) = Color(red * f, green * f, blue * f, alpha)
 
+private fun hsv(h: Float, s: Float, v: Float, a: Float = 1f) =
+    Color(android.graphics.Color.HSVToColor(floatArrayOf(((h % 360f) + 360f) % 360f, s.coerceIn(0f, 1f), v.coerceIn(0f, 1f)))).copy(alpha = a)
+
+private fun Color.hsv(): FloatArray = FloatArray(3).also {
+    android.graphics.Color.RGBToHSV((red * 255).toInt(), (green * 255).toInt(), (blue * 255).toInt(), it)
+}
+
+/** Drugi kolor przejścia do pary z tym (jak fiolet do niebieskiego w iDrive 8): ten sam ton przesunięty o kawałek koła barw. */
+fun Color.partner(): Color = hsv().let { hsv(it[0] + 28f, it[1], it[2], alpha) }
+
 /** Wygląd z nałożonymi zmianami użytkownika. */
 fun KokpitTheme.customized(c: ThemeCustom): KokpitTheme {
     var t = this
-    c.glow?.let { Color(it) }?.let { g ->
+    // wyglądy z barwionymi blokami (iDrive 8): gdy wybrano tylko jeden z kolorów, drugi bierze się z niego,
+    // inaczej połowa ekranu zostaje w fabrycznym niebieskim
+    val tinted = planes != null
+    val glowC = (c.glow ?: if (tinted) c.accent else null)?.let { Color(it) }
+    val accentC = (c.accent ?: if (tinted) c.glow else null)?.let { Color(it) }
+    glowC?.let { g ->
         t = t.copy(
             aurora = g.copy(alpha = 0.32f) to g.dim(0.8f).copy(alpha = 0.18f),
             sweep = Color(minOf(1f, g.red * 0.6f + 0.4f), minOf(1f, g.green * 0.6f + 0.4f), minOf(1f, g.blue * 0.6f + 0.4f), 0.9f),
             glow = g.copy(alpha = 0.22f),
             carBack = Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent, g.copy(alpha = 0.18f))),
         )
+        if (tinted) {
+            // tło i krawędzie bloków oraz ukośne pasy światła w tym samym tonie co poświata
+            val (hue, sat, _) = g.hsv()
+            val k = minOf(1f, sat / 0.7f) // szarości i biel zostają bez barwy
+            val hue2 = hue + 28f
+            t = t.copy(
+                block = Brush.linearGradient(
+                    0f to hsv(hue, 0.64f * k, 0.31f), 0.45f to hsv(hue, 0.64f * k, 0.18f), 1f to hsv(hue, 0.62f * k, 0.09f),
+                    start = androidx.compose.ui.geometry.Offset.Zero, end = androidx.compose.ui.geometry.Offset.Infinite,
+                ),
+                blockEdge = Brush.linearGradient(
+                    0f to hsv(hue, 0.41f * k, 1f, 0.8f), 0.35f to hsv(hue2, 0.6f * k, 1f, 0.18f),
+                    0.7f to Color(0x0DFFFFFF), 1f to hsv(hue2, 0.65f * k, 1f, 0.5f),
+                    start = androidx.compose.ui.geometry.Offset.Zero, end = androidx.compose.ui.geometry.Offset.Infinite,
+                ),
+                planes = hsv(hue, 0.73f * k, 1f, 0.16f) to hsv(hue2, 0.69f * k, 1f, 0.15f),
+            )
+        }
     }
     c.screen?.let { Color(it) }?.let { b ->
         t = t.copy(screen = Brush.verticalGradient(listOf(b, b.dim(0.45f), Color(0xFF030406))))
     }
-    c.accent?.let { Color(it) }?.let { a ->
+    accentC?.let { a ->
         val light = a.red * 0.3f + a.green * 0.59f + a.blue * 0.11f > 0.7f
         t = t.copy(
             selected = Brush.verticalGradient(listOf(a.copy(alpha = 0.35f), a.copy(alpha = 0.22f), a.copy(alpha = 0.13f))),
@@ -295,6 +328,20 @@ fun KokpitTheme.customized(c: ThemeCustom): KokpitTheme {
             active = Brush.verticalGradient(listOf(a, a.dim(0.7f))),
             activeText = if (light) Color(0xFF0B0E13) else Color.White,
         )
+        if (tinted) {
+            // przejścia w dwóch tonach, pasek paliwa i cyfry prędkości też w wybranym kolorze
+            val b = a.partner()
+            val (hue, sat, _) = a.hsv()
+            t = t.copy(
+                selected = Brush.linearGradient(
+                    0f to a.copy(alpha = 0.4f), 1f to b.copy(alpha = 0.3f),
+                    start = androidx.compose.ui.geometry.Offset.Zero, end = androidx.compose.ui.geometry.Offset.Infinite,
+                ),
+                active = Brush.horizontalGradient(listOf(a, b)),
+                fuel = Brush.horizontalGradient(listOf(a, b, hsv(hue + 50f, sat * 0.5f, 1f))),
+                speed = Brush.verticalGradient(listOf(Color.White, Color.White, hsv(hue, minOf(0.44f, sat), 1f))),
+            )
+        }
     }
     return t
 }

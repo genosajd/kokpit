@@ -533,7 +533,7 @@ private fun SoundBars(playing: Boolean, style: Int, modifier: Modifier) {
         }
     }
     val top = Accent
-    val violet = androidx.compose.ui.graphics.Color(0xFF8B5CF6)
+    val violet = if (top.value == androidx.compose.ui.graphics.Color(DEFAULT_ACCENT).value) androidx.compose.ui.graphics.Color(0xFF8B5CF6) else top.partner() // własny kolor: drugi ton z niego
     val hot = Warn
     androidx.compose.foundation.Canvas(modifier) {
         frame.intValue // przerysuj przy każdej nowej klatce

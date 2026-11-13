@@ -304,7 +304,7 @@ fun BlockGrid(
             for (r in 0 until GRID_ROWS) for (c in 0 until GRID_COLS) {
                 Box(
                     Modifier.offset(x = (cellW + gap) * c, y = (cellH + gap) * r).size(cellW, cellH)
-                        .clip(RoundedCornerShape(d(28))).background(Color(0x0A4DA3FF))
+                        .clip(RoundedCornerShape(d(28))).background(Accent.copy(alpha = 0.04f))
                 )
             }
         }
@@ -318,7 +318,7 @@ fun BlockGrid(
             Box(
                 Modifier.offset(x = (cellW + gap) * p.c, y = (cellH + gap) * p.r)
                     .size((cellW + gap) * p.w - gap, (cellH + gap) * p.h - gap)
-                    .clip(RoundedCornerShape(d(28))).background(Color(0x334DA3FF))
+                    .clip(RoundedCornerShape(d(28))).background(Accent.copy(alpha = 0.2f))
             )
         }
 

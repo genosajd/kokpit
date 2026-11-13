@@ -153,7 +153,10 @@ val Line: Color get() = if (LightMode.on) Color(0x1A000000) else Color(0x12FFFFF
 val Txt: Color get() = if (LightMode.on) Color(0xFF111824) else Color(0xFFEEF2F7)
 val Dim: Color get() = if (LightMode.on) Color(0xFF5A6678) else Color(0xFF8A96A8)
 /** Kolor akcentu: z Dostosuj, inaczej niebieski. Odczyt w kompozycji = przerysowanie po zmianie. */
-val Accent: Color get() = Color(ThemeCustoms.current().accent ?: DEFAULT_ACCENT)
+val Accent: Color get() = ThemeCustoms.current().let { c ->
+    // w wyglądach z barwionymi blokami (iDrive 8) sam kolor poświaty przebarwia też ikony
+    Color(c.accent ?: c.glow?.takeIf { themeState.value.planes != null } ?: DEFAULT_ACCENT)
+}
 val Warn = Color(0xFFFFB547)
 
 /** Jednostka projektu: ekran zaprojektowany jest na 2560×720, a ta wartość przelicza go na dp tego ekranu. */
@@ -1411,7 +1414,7 @@ fun AssistantBlock(modifier: Modifier, slot: Slot, act: MainActivity, onSettings
                             val l = lines[i]
                             Box(Modifier.fillMaxWidth(), contentAlignment = if (l.fromUser) Alignment.CenterEnd else Alignment.CenterStart) {
                                 Text(
-                                    l.text, color = if (l.fromUser) LocalTheme.current.activeText else Txt, fontSize = s(22), lineHeight = s(30),
+                                    if (l.fromUser) l.text else Speech.plain(l.text), color = if (l.fromUser) LocalTheme.current.activeText else Txt, fontSize = s(22), lineHeight = s(30),
                                     modifier = Modifier.fillMaxWidth(0.88f).wrapContentWidth(if (l.fromUser) Alignment.End else Alignment.Start)
                                         .then(if (l.fromUser) Modifier.kokpitSurface(d(16), active = true) else Modifier.kokpitSurface(d(16)))
                                         .combinedClickable(onClick = {}, onLongClick = { if (!l.fromUser) act.speak(l.text) })
