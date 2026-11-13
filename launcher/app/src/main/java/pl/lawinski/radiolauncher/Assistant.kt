@@ -280,9 +280,16 @@ private object AssistantTools {
     }
 
     /** Sterowanie odtwarzaczem przez MediaSession; wymaga dostępu do powiadomień (ten sam co trasa z Map). */
+    /** Czas słowami („28 minut 38 sekund”) – zapis 28:38 lektor czyta jak godzinę albo cyfra po cyfrze. */
     private fun clock(ms: Long): String {
         val s = (ms / 1000).coerceAtLeast(0)
-        return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
+        fun form(n: Long, one: String, few: String, many: String) =
+            "$n " + if (n == 1L) one else if (n % 10 in 2..4 && n % 100 !in 12..14) few else many
+        val parts = mutableListOf<String>()
+        if (s >= 3600) parts += form(s / 3600, "godzina", "godziny", "godzin")
+        if (s / 60 % 60 > 0) parts += form(s / 60 % 60, "minuta", "minuty", "minut")
+        if (s % 60 > 0 || parts.isEmpty()) parts += form(s % 60, "sekunda", "sekundy", "sekund")
+        return parts.joinToString(" ")
     }
 
     /** Pozycja odtwarzania teraz (stan sesji podaje ją z chwili ostatniej zmiany). */
@@ -574,6 +581,7 @@ private object AssistantTools {
 
 private const val BASE_PROMPT = """Jesteś asystentem w aucie: ekran radia w BMW F11 Touring z launcherem Kokpit F11. Rozmawia z Tobą kierowca albo pasażer.
 Odpowiadaj po polsku, krótko i naturalnie, zwykle 1–3 zdaniami – odpowiedzi są czytane na głos, więc pisz zwykłym tekstem, bez list, nagłówków, tabel i znaczników Markdown.
+Pisz tak, jak ma to zostać wypowiedziane, bo lektor czyta tekst dosłownie: czas trwania i miejsce w utworze albo filmie słowami („28 minut 38 sekund”, nigdy 28:38), jednostki i skróty w pełnym brzmieniu („kilometrów na godzinę”, „stopni”, „na przykład”, nie km/h, °C, np.), ułamki z przecinkiem i słowem („siedem i pół litra”), bez symboli typu /, ~, →, &. Godziny zegarowe (14:30), daty i zwykłe liczby zapisuj normalnie.
 Kierowca nie powinien czytać długich tekstów w czasie jazdy, dlatego najważniejsze mów na początku.
 Masz narzędzia: car_status (stan auta, położenie, trasa), navigate i open_saved_place (włączają nawigację w Mapach Google), places (szuka miejsc w Google Maps z ocenami i godzinami otwarcia oraz podaje czas dojazdu z korkami – używaj zamiast zgadywania, gdy ktoś pyta o miejsca w pobliżu albo ile się jedzie), open_app (uruchamia aplikację w radiu i może w niej wyszukać), play_youtube (od razu odtwarza w YouTube to, o co ktoś prosi), media_control (pauza, wznowienie, następny, poprzedni, co teraz gra, przewijanie o podany czas lub do podanego miejsca, włączenie wybranego odtwarzacza w tle) i radio_control (głośność, jasność, ekran BMW iDrive, podzielony ekran, ustawienia, wygląd Kokpitu) camera_control (obrót kamery, punkty, zoom), home_ac (klimatyzator w domu: temperatura, wł./wył., ustawienie), calendar (kalendarz Google właściciela: terminy i dodawanie nowych), slack (Slack właściciela: nieprzeczytane, czytanie, szukanie i wysyłanie – zawsze z potwierdzeniem) i camera_snapshot (aktualne zdjęcie z kamery Xiaomi – gdy ktoś pyta, co widać na kamerze, zawsze zrób nowe zdjęcie). Gdy ktoś prosi o włączenie muzyki lub filmu, użyj play_youtube. Gdy pytanie dotyczy auta, paliwa, miejsca albo trasy, najpierw sprawdź car_status. Gdy ktoś prosi o trasę, od razu włącz nawigację i krótko to potwierdź."""
 
