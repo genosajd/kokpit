@@ -3,6 +3,20 @@
 Launcher (ekran główny) na Androida dla radia Witstek (YA32, CAN NBT) w BMW F11 z iDrive NBT.
 Kotlin + Jetpack Compose, ekran 2560x720.
 
+![Ekran główny w wyglądzie iDrive 8](docs/pulpit-idrive8.jpg)
+
+## Zrzuty ekranu
+
+Zrzuty z emulatora 2560x720. Podgląd kamery jest na nich celowo rozmyty.
+
+| | |
+|---|---|
+| ![Wygląd M Sport](docs/pulpit-msport.jpg) Wygląd M Sport | ![Tryb jasny](docs/pulpit-jasny.jpg) BMW iDrive w trybie jasnym |
+| ![Edycja układu](docs/uklad.jpg) Edycja układu: przeciąganie, zmiana rozmiaru i chowanie klocków | ![Ustawienia – wygląd](docs/ustawienia-wyglad.jpg) Ustawienia: wybór wyglądu |
+
+![Ustawienia asystenta](docs/ustawienia-asystent.jpg)
+Ustawienia asystenta: hasło głosowe i mikrofon
+
 ## Co potrafi
 
 - Bloki na siatce 8x2, które można przestawiać, powiększać i chować: skróty aplikacji, auto, nawigacja, kamera, pogoda i dowolne widżety Androida (bloków „Widżet” może być kilka, widżet zmienia się przyciskiem „Zmień” w edycji układu).
