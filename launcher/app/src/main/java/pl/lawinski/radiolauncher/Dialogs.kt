@@ -269,7 +269,7 @@ fun SettingsDialog(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("Kokpit F11 0.3.19", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
+                Text("Kokpit F11 0.3.20", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
             }
             Spacer(Modifier.width(d(26)))
             LazyVerticalGrid(
@@ -545,7 +545,7 @@ fun SettingsDialog(
                 if (Prefs.elevenKey.isNotBlank()) item {
                     val idx = Speech.ELEVEN_MODELS.indexOfFirst { it.first == elevenModel }.coerceAtLeast(0)
                     SettingTile(Icons.Outlined.Tune, "Model ElevenLabs: " + Speech.ELEVEN_MODELS[idx].second,
-                        listOf("Najmniejsze opóźnienie – dobry do auta", "Lepsza intonacja, odpowiada wolniej", "Najbardziej żywy, najwolniejszy")[idx] + ". Dotknij, aby zmienić") {
+                        listOf("Najmniejsze opóźnienie – dobry do auta", "Lepsza intonacja, odpowiada wolniej", "Najbardziej żywy, z emocjami (śmiech, westchnienie, szept…), najwolniejszy")[idx] + ". Dotknij, aby zmienić") {
                         elevenModel = Speech.ELEVEN_MODELS[(idx + 1) % Speech.ELEVEN_MODELS.size].first; Prefs.elevenModel = elevenModel
                     }
                 }
