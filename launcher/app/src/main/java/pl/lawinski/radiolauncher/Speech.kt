@@ -43,6 +43,25 @@ object Speech {
         "eleven_v3" to "ekspresyjny",
     )
 
+    /** Modele ElevenLabs, które grają znaczniki emocji w nawiasach kwadratowych; pozostałe czytałyby je na głos. */
+    private val TAG_MODELS = setOf("eleven_v3")
+
+    private val TAG = Regex("\\[[^\\[\\]\\n]{1,40}]")
+
+    /** Czy odpowiedź przeczyta teraz głos, który rozumie znaczniki emocji, np. [sighs] (tylko ElevenLabs „ekspresyjny”). */
+    fun tagsOn() = Prefs.ttsEngine == ELEVEN && Prefs.elevenKey.isNotBlank() && !elevenPaused() && Prefs.elevenModel in TAG_MODELS
+
+    /** Tekst bez znaczników emocji – do pokazania na ekranie i dla głosów, które ich nie rozumieją. */
+    fun plain(text: String) = if ('[' !in text) text else
+        text.replace(TAG, "").replace(Regex("[ \\t]{2,}"), " ").replace(Regex(" ([.,!?;:])"), "$1").trim()
+
+    /** Dopisek do promptu asystenta, gdy głos gra znaczniki emocji. */
+    fun tagNote() = if (!tagsOn()) "" else "\n\nTwoje odpowiedzi czyta głos ElevenLabs v3, który odgrywa znaczniki w nawiasach kwadratowych. " +
+        "Wstawiaj je w tekst tam, gdzie pasują do treści i nastroju – emocje i sposób mówienia, np. [ze złością], [z ekscytacją], [ze znudzeniem], [groźnie], [figlarnie], [słabym głosem], [zmęczonym głosem], [szeptem], " +
+        "oraz odgłosy, np. [śmieje się], [śmieje się pod nosem], [wzdycha], [dyszy], [łapie powietrze], [ostry wydech], [prycha], [odchrząkuje], [kaszle], [ziewa], [pociąga nosem], [nuci]. " +
+        "Znaczniki pisz po polsku, małymi literami, przed fragmentem, którego dotyczą; możesz użyć też innych w tym stylu. Zwykle jeden lub dwa na odpowiedź, w rzeczowych odpowiedziach mogą nie być potrzebne. " +
+        "Słuchacz ich nie widzi ani nie słyszy jako słów, więc nie zastępują treści. Nawiasów kwadratowych nie używaj do niczego innego."
+
     /** Po wyczerpaniu limitu znaków ElevenLabs: tyle czasu czyta głos systemowy, potem kolejna próba. */
     private const val ELEVEN_PAUSE_MS = 6 * 60 * 60 * 1000L
 
@@ -154,8 +173,11 @@ object Speech {
     fun isSpeaking() = tts?.isSpeaking == true || runCatching { player?.isPlaying == true }.getOrDefault(false)
 
     fun speak(ctx: Context, text: String) {
-        val clean = text.replace(Regex("[*_#`>|]"), "").replace(Regex("\\s+"), " ").trim()
+        // znaczniki emocji zostają tylko dla głosu, który je odgrywa – inne głosy czytałyby je jako słowa
+        val clean = (if (tagsOn()) text else plain(text)).replace(Regex("[*_#`>|]"), "").replace(Regex("\\s+"), " ").trim()
         if (clean.isEmpty()) return
+        // do diagnozy: który głos i jakie znaczniki poszły (bez treści odpowiedzi)
+        android.util.Log.i("KokpitSpeech", "głos=${Prefs.ttsEngine} znaczniki=${if (tagsOn()) TAG.findAll(clean).joinToString(" ") { it.value }.ifEmpty { "brak" } else "wyłączone"}")
         stop(keepDuck = true)
         when {
             Prefs.ttsEngine == OPENAI && Prefs.openaiKey.isNotBlank() -> speakOpenAi(ctx, clean, Prefs.openaiVoice)
@@ -217,13 +239,14 @@ object Speech {
             } catch (e: QuotaError) {
                 Prefs.elevenPausedUntil = System.currentTimeMillis() + ELEVEN_PAUSE_MS
                 android.widget.Toast.makeText(ctx, "Limit ElevenLabs wyczerpany – przez kilka godzin czytam głosem systemowym", android.widget.Toast.LENGTH_LONG).show()
-                speakSystem(ctx, text)
+                speakSystem(ctx, plain(text))
                 return@launch
             } catch (e: Exception) {
                 android.widget.Toast.makeText(ctx, "Głos $name nie działa (${e.message}) – czytam głosem systemowym", android.widget.Toast.LENGTH_LONG).show()
-                speakSystem(ctx, text)
+                speakSystem(ctx, plain(text))
                 return@launch
             }
+            android.util.Log.i("KokpitSpeech", "$name: plik z mową gotowy (${file.length() / 1024} kB)")
             duck(ctx)
             player = runCatching {
                 MediaPlayer().apply {
@@ -329,7 +352,7 @@ object Speech {
         val c = elevenOpen("/v1/text-to-speech/" + java.net.URLEncoder.encode(voice, "UTF-8") + "?output_format=mp3_44100_128", post = true)
         val body = JSONObject().put("text", text).put("model_id", model)
         // wskazanie języka przyjmują tylko modele 2.5 – bez niego krótkie polskie zdania bywają czytane z obcym akcentem
-        if (model.endsWith("_v2_5")) body.put("language_code", "pl")
+        if (model.endsWith("_v2_5") || model in TAG_MODELS) body.put("language_code", "pl")
         c.outputStream.use { it.write(body.toString().toByteArray()) }
         if (c.responseCode !in 200..299) elevenFail(c)
         val f = File(ctx.cacheDir, "tts.mp3")

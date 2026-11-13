@@ -388,7 +388,7 @@ class VoiceActivity : ComponentActivity() {
                         Text("Myślę…", color = Txt, fontSize = 22.sp)
                     }
                     Phase.ANSWER, Phase.ERROR -> Text(
-                        a,
+                        Speech.plain(a), // znaczniki emocji są tylko dla głosu
                         color = if (p == Phase.ERROR) Warn else Txt,
                         fontSize = 22.sp, lineHeight = 30.sp,
                         modifier = Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState()),

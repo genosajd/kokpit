@@ -505,7 +505,7 @@ Masz narzędzia: car_status (stan auta, położenie, trasa), navigate i open_sav
 /** Prompt systemowy: stały opis roli + instrukcje właściciela z Ustawień (jak się zwracać, styl…). */
 private fun systemPrompt(): String {
     val own = Prefs.aiInstructions.trim()
-    val base = BASE_PROMPT + Access.promptNote()
+    val base = BASE_PROMPT + Access.promptNote() + Speech.tagNote()
     return if (own.isEmpty()) base
     else "$base\n\nInstrukcje od właściciela auta (stosuj je zawsze, chyba że przeczą bezpieczeństwu w czasie jazdy):\n$own"
 }
@@ -829,7 +829,7 @@ object Assistant {
             ok?.let { tokens.value = it.tokens; save(it) }
             if (Prefs.aiSpeak || speak) act.speak(reply)
             // bez bloku „Asystent” na ekranie (wywołanie przyciskiem głosowym) pokaż odpowiedź w dymku
-            if (!VoiceActivity.open && act.layout.value.none { it.id == BlockId.ASSISTANT }) android.widget.Toast.makeText(act, reply, android.widget.Toast.LENGTH_LONG).show()
+            if (!VoiceActivity.open && act.layout.value.none { it.id == BlockId.ASSISTANT }) android.widget.Toast.makeText(act, Speech.plain(reply), android.widget.Toast.LENGTH_LONG).show()
         }
     }
 
