@@ -330,6 +330,48 @@ object Speech {
         }
     }
 
+    /** Głos z publicznej biblioteki ElevenLabs (jeszcze nie na koncie): [free] = wolno go używać w darmowym planie. */
+    class LibraryVoice(val ownerId: String, val id: String, val name: String, val info: String, val preview: String, val free: Boolean)
+
+    /** Polskie głosy z biblioteki ElevenLabs, najpierw te dostępne w darmowym planie. Wołać poza wątkiem głównym. */
+    fun elevenLibrary(): List<LibraryVoice> {
+        val c = elevenOpen("/v1/shared-voices?language=pl&page_size=100", post = false)
+        if (c.responseCode !in 200..299) elevenFail(c)
+        val a = JSONObject(c.inputStream.bufferedReader().use { it.readText() }).optJSONArray("voices") ?: return emptyList()
+        return (0 until a.length()).map { i ->
+            val v = a.getJSONObject(i)
+            fun f(k: String) = v.optString(k).takeIf { it.isNotBlank() && it != "null" }?.replace('_', ' ')
+            val free = v.optBoolean("free_users_allowed")
+            val info = listOfNotNull(if (free) "także w darmowym planie" else "płatny plan", f("gender"), f("age"), f("descriptive"), f("use_case")).joinToString(" · ")
+            LibraryVoice(v.optString("public_owner_id"), v.optString("voice_id"), v.optString("name").trim().ifBlank { "głos ${i + 1}" }, info, v.optString("preview_url"), free)
+        }.filter { it.ownerId.isNotBlank() && it.id.isNotBlank() }.sortedByDescending { it.free }
+    }
+
+    /** Dodaje głos z biblioteki do konta właściciela („Moje głosy”); zwraca jego identyfikator na koncie. */
+    fun elevenAdd(v: LibraryVoice): String {
+        val c = elevenOpen("/v1/voices/add/${v.ownerId}/${v.id}", post = true)
+        c.outputStream.use { it.write(JSONObject().put("new_name", v.name.take(60)).toString().toByteArray()) }
+        if (c.responseCode !in 200..299) elevenFail(c)
+        return JSONObject(c.inputStream.bufferedReader().use { it.readText() }).optString("voice_id").ifBlank { v.id }
+    }
+
+    /** Gotowa próbka głosu z biblioteki (plik z ElevenLabs – nie zużywa znaków). */
+    fun previewUrl(url: String) {
+        stop()
+        if (url.isBlank()) return
+        runCatching {
+            player = MediaPlayer().apply {
+                setAudioAttributes(android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                setDataSource(url)
+                setOnPreparedListener { if (player === it) it.start() }
+                setOnCompletionListener { it.release(); if (player === it) player = null }
+                setOnErrorListener { mp, _, _ -> mp.release(); if (player === mp) player = null; true }
+                prepareAsync()
+            }
+        }
+    }
+
     /** Zużycie na koncie ElevenLabs w bieżącym okresie: wykorzystane znaki, limit, czas odnowienia (ms; 0 = nieznany). */
     class ElevenUsage(val used: Long, val limit: Long, val resetAt: Long)
 

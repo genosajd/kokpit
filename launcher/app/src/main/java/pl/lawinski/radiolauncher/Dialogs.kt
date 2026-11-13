@@ -279,7 +279,7 @@ fun SettingsDialog(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("Kokpit F11 0.3.22", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
+                Text("Kokpit F11 0.3.23", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
             }
             Spacer(Modifier.width(d(26)))
             LazyVerticalGrid(
@@ -884,6 +884,8 @@ private fun Swatch(color: Long?, selected: Boolean, label: String?, onClick: () 
 @Composable
 fun VoicePickerDialog(act: MainActivity, onClose: () -> Unit) {
     var engine by remember { mutableStateOf(Prefs.ttsEngine) }
+    // zakładka na start = dostawca wybranego głosu
+    var tab by remember { mutableStateOf(when (Prefs.ttsEngine) { Speech.OPENAI -> 1; Speech.ELEVEN -> 2; else -> 0 }) }
     var sysVoice by remember { mutableStateOf(Prefs.ttsVoice) }
     var oaVoice by remember { mutableStateOf(Prefs.openaiVoice) }
     var voices by remember { mutableStateOf<List<android.speech.tts.Voice>?>(null) }
@@ -901,6 +903,22 @@ fun VoicePickerDialog(act: MainActivity, onClose: () -> Unit) {
             elErr = e.message ?: e.javaClass.simpleName
         }
     }
+    // polskie głosy z biblioteki ElevenLabs: pierwsze dotknięcie = próbka, drugie = dodanie do konta i wybór
+    var lib by remember { mutableStateOf<List<Speech.LibraryVoice>?>(null) }
+    var libMsg by remember { mutableStateOf<String?>(null) }
+    var libPick by remember { mutableStateOf("") }
+    var libBusy by remember { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    LaunchedEffect(Unit) {
+        if (Prefs.elevenKey.isBlank()) return@LaunchedEffect
+        try {
+            lib = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Speech.elevenLibrary() }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            libMsg = "nie udało się pobrać biblioteki: " + (e.message ?: e.javaClass.simpleName)
+        }
+    }
     androidx.compose.runtime.DisposableEffect(Unit) { onDispose { Speech.stop() } }
     Sheet("Głos odpowiedzi", { Speech.stop(); onClose() }) {
         LazyVerticalGrid(
@@ -908,6 +926,17 @@ fun VoicePickerDialog(act: MainActivity, onClose: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(d(14)),
             horizontalArrangement = Arrangement.spacedBy(d(14)),
         ) {
+            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                Row(horizontalArrangement = Arrangement.spacedBy(d(12))) {
+                    VOICE_TABS.forEachIndexed { i, title ->
+                        val on = i == tab
+                        Text(title, color = if (on) LocalTheme.current.activeText else Txt, fontSize = s(22), fontWeight = if (on) FontWeight.Medium else FontWeight.Normal, maxLines = 1,
+                            modifier = Modifier.kokpitSurface(d(16), fill = on, active = on).combinedClickable(onClick = { tab = i; Speech.stop() })
+                                .padding(horizontal = d(22), vertical = d(14)))
+                    }
+                }
+            }
+            if (tab == 0) {
             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                 Text("Google w radiu – bezpłatnie; głosy „sieciowe” brzmią naturalniej, ale potrzebują internetu", color = Dim, fontSize = s(20))
             }
@@ -924,12 +953,13 @@ fun VoicePickerDialog(act: MainActivity, onClose: () -> Unit) {
                     Speech.previewSystem(act, v)
                 }
             }
+            }
+            if (tab == 1) {
             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                 Text(
                     if (Prefs.openaiKey.isBlank()) "OpenAI – najbardziej ludzkie głosy; najpierw wpisz klucz API OpenAI (dostawcą rozmowy może zostać Claude)"
                     else "OpenAI – najbardziej ludzkie głosy, płatne według długości tekstu (model ${Prefs.openaiTtsModel})",
-                    color = Dim, fontSize = s(20), modifier = Modifier.padding(top = d(10)),
-                )
+                    color = Dim, fontSize = s(20),                 )
             }
             items(Speech.OPENAI_VOICES.size) { i ->
                 val v = Speech.OPENAI_VOICES[i]
@@ -940,6 +970,8 @@ fun VoicePickerDialog(act: MainActivity, onClose: () -> Unit) {
                     Speech.previewOpenAi(act, v)
                 }
             }
+            }
+            if (tab == 2) {
             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                 Text(
                     when {
@@ -948,8 +980,7 @@ fun VoicePickerDialog(act: MainActivity, onClose: () -> Unit) {
                         elVoices == null -> "ElevenLabs – wczytywanie głosów…"
                         else -> "ElevenLabs – głosy z Twojego konta, płatne według liczby znaków (odsłuch też zużywa znaki)"
                     },
-                    color = if (elErr != null) Warn else Dim, fontSize = s(20), modifier = Modifier.padding(top = d(10)),
-                )
+                    color = if (elErr != null) Warn else Dim, fontSize = s(20),                 )
             }
             elVoices?.let { el ->
                 items(el.size) { i ->
@@ -959,6 +990,48 @@ fun VoicePickerDialog(act: MainActivity, onClose: () -> Unit) {
                         engine = Speech.ELEVEN; elVoice = v.id
                         Prefs.ttsEngine = Speech.ELEVEN; Prefs.elevenVoice = v.id; Prefs.elevenVoiceName = v.name
                         Speech.previewEleven(act, v.id)
+                    }
+                }
+            }
+            }
+            if (tab == 3 && Prefs.elevenKey.isBlank()) item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                Text("Najpierw wpisz klucz ElevenLabs w Ustawienia → Asystent AI → Głos", color = Dim, fontSize = s(20))
+            }
+            if (tab == 3 && Prefs.elevenKey.isNotBlank()) {
+                // głosy już dodane do konta nie powtarzają się w bibliotece
+                val have = elVoices.orEmpty().map { it.name.trim().lowercase() }.toSet()
+                val rest = lib.orEmpty().filter { it.name.lowercase() !in have }
+                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                    Text(
+                        libMsg?.let { "Biblioteka ElevenLabs – $it" } ?: when {
+                            lib == null -> "Biblioteka ElevenLabs – wczytywanie polskich głosów…"
+                            rest.isEmpty() -> "Biblioteka ElevenLabs – brak kolejnych polskich głosów"
+                            else -> "Polskie głosy z biblioteki ElevenLabs: dotknij, aby odsłuchać próbkę (bez zużycia znaków); dotknij drugi raz, aby dodać głos do konta i wybrać. Głosy z dopiskiem „płatny plan” nie mówią na darmowym koncie."
+                        },
+                        color = if (libMsg != null) Warn else Dim, fontSize = s(20),                     )
+                }
+                items(rest.size) { i ->
+                    val v = rest[i]
+                    val picked = libPick == v.id
+                    SettingTile(Icons.Outlined.GraphicEq, v.name, if (picked) (if (libBusy) "Dodaję do konta…" else "Dotknij ponownie, aby dodać do konta i wybrać") else v.info, on = picked) {
+                        if (libBusy) return@SettingTile
+                        if (!picked) { libPick = v.id; libMsg = null; Speech.previewUrl(v.preview); return@SettingTile }
+                        libBusy = true
+                        scope.launch {
+                            try {
+                                val (id, list) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Speech.elevenAdd(v).let { it to Speech.elevenVoices() } }
+                                elVoices = list
+                                engine = Speech.ELEVEN; elVoice = id
+                                Prefs.ttsEngine = Speech.ELEVEN; Prefs.elevenVoice = id; Prefs.elevenVoiceName = v.name
+                                libPick = ""; tab = 2
+                                Speech.previewEleven(act, id)
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                libMsg = "nie udało się dodać „${v.name}”: " + (e.message ?: e.javaClass.simpleName)
+                            }
+                            libBusy = false
+                        }
                     }
                 }
             }
@@ -1040,6 +1113,9 @@ fun HotwordPhraseDialog(onClose: () -> Unit) {
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
     )
 }
+
+/** Zakładki okna „Głos odpowiedzi”. */
+private val VOICE_TABS = listOf("Google (w radiu)", "OpenAI", "ElevenLabs – moje", "ElevenLabs – polskie z biblioteki")
 
 /** Zakładki w Ustawienia → Asystent AI. */
 private val AI_TABS = listOf(
