@@ -242,6 +242,7 @@ class MainActivity : ComponentActivity() {
         Rules.start()
         // po nagłym końcu nawigacji / procesu: przywróć wyskakujące powiadomienia
         NavPopups.apply(this, NavState.info.value != null)
+        GridGeom.init(this)
         layout.value = LayoutStore.decode(Prefs.layout)
         hasSavedLayout.value = Prefs.layoutSaved.isNotBlank()
         layout.value.filter { it.id == BlockId.WIDGET }.forEach { blockWidgets[it.n] = Prefs.blockWidgetId(it.n) }

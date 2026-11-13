@@ -64,7 +64,7 @@ enum class BlockId(val title: String, val minW: Int, val minH: Int, val multi: B
     MEDIA("Multimedia", 1, 1),
 }
 
-/** Położenie klocka na siatce 8 × 2: kolumna, rząd, szerokość, wysokość; n = numer egzemplarza. */
+/** Położenie klocka na siatce (8 kolumn na stronę × GRID_ROWS wierszy): kolumna, rząd, szerokość, wysokość; n = numer egzemplarza. */
 data class Slot(val id: BlockId, val c: Int, val r: Int, val w: Int, val h: Int, val n: Int = 0) {
     /** Unikalny klucz klocka, np. "NAV" albo "WIDGET#2" (zapisywany w układzie). */
     val key get() = if (n == 0) id.name else "${id.name}#$n"
@@ -79,9 +79,51 @@ object GridPages {
 }
 
 val GRID_COLS: Int get() = 8 * GridPages.count.intValue
-const val GRID_ROWS = 2
+val GRID_ROWS: Int get() = GridGeom.rows.intValue
+
+/**
+ * Ile kolumn siatki mieści się naraz na ekranie. Radio 2560×720 ma 8; węższe ekrany mają mniej
+ * (np. 1920×720 – 6, 1280×720 i 1024×600 – 4), żeby klocek zachował kształt i wielkość z projektu.
+ * Reszta siatki (zawsze 8 kolumn na „stronę ekranu”) przewija się w bok.
+ */
+object GridGeom {
+    val cols = androidx.compose.runtime.mutableIntStateOf(8)
+
+    /**
+     * Wiersze siatki: 2, a na wysokich ekranach 3. Liczone raz przy starcie z wysokości ekranu w dp
+     * (radio 2560×720 ma 480 dp → 2 wiersze po 240 dp; od 700 dp mieszczą się 3 wiersze tej samej wielkości),
+     * przed wczytaniem układu – zapisany układ zależy od liczby wierszy.
+     */
+    val rows = androidx.compose.runtime.mutableIntStateOf(2)
+
+    fun init(c: android.content.Context) {
+        val dm = android.util.DisplayMetrics()
+        @Suppress("DEPRECATION")
+        (c.getSystemService(android.content.Context.WINDOW_SERVICE) as android.view.WindowManager).defaultDisplay.getRealMetrics(dm)
+        val heightDp = minOf(dm.widthPixels, dm.heightPixels) / dm.density
+        rows.intValue = if (heightDp >= 700f) 3 else 2
+    }
+
+    /** Liczba kolumn dla ekranu o danych proporcjach (komórka projektu to 320 × 360 jednostek); lekki zapas w górę, bo pasek systemu potrafi zabrać kawałek szerokości. */
+    fun colsFor(width: Float, height: Float) = kotlin.math.round(width / height * rows.intValue * 1.125f + 0.15f).toInt().coerceIn(3, 8)
+}
 
 object LayoutStore {
+    /** Układ startowy dla wąskich ekranów (4 kolumny): każdy ekran to pełne klocki, nic nie jest przecięte. */
+    private val NARROW = listOf(
+        Slot(BlockId.SHORTCUTS, 0, 0, 2, 2),
+        Slot(BlockId.CAR, 2, 0, 2, 2),
+        Slot(BlockId.NAV, 4, 0, 2, 2),
+        Slot(BlockId.CAMERA, 6, 0, 2, 1),
+        Slot(BlockId.WEATHER, 6, 1, 2, 1),
+    )
+
+    /** Układ startowy dla tego ekranu; przy trzech wierszach klocki z górnego wiersza rosną o jeden, dolne schodzą na sam dół. */
+    fun defaultFor(cols: Int): List<Slot> {
+        val base = if (cols <= 5) NARROW else DEFAULT
+        return if (GRID_ROWS < 3) base else base.map { if (it.r == 0) it.copy(h = it.h + 1) else it.copy(r = it.r + 1) }
+    }
+
     val DEFAULT = listOf(
         Slot(BlockId.SHORTCUTS, 0, 0, 2, 2),
         Slot(BlockId.CAR, 2, 0, 3, 2),
@@ -91,7 +133,7 @@ object LayoutStore {
     )
 
     fun decode(s: String?): List<Slot> {
-        if (s.isNullOrBlank()) return DEFAULT
+        if (s.isNullOrBlank()) return defaultFor(GridGeom.cols.intValue)
         return try {
             s.split(';').filter { it.isNotBlank() }.map { part ->
                 val (key, rest) = part.split(':')
@@ -237,12 +279,13 @@ fun BlockGrid(
         val density = LocalDensity.current
         // kilka stron ekranu: zawsze 8 kolumn na szerokość ekranu, reszta przewijana w bok
         // (w edycji też – przewija się palcem po pustych polach, klocki przeciąga się jak zwykle)
-        val pages = GridPages.count.intValue
-        val scrolling = pages > 1
+        // na ekran wchodzi [GridGeom.cols] kolumn (8 w radiu 2560×720, mniej na węższych ekranach)
+        val shown = GridGeom.cols.intValue.coerceAtMost(GRID_COLS)
+        val scrolling = GRID_COLS > shown
         val scroll = androidx.compose.foundation.rememberScrollState()
         val pageW = maxWidth
-        val cellW = if (scrolling) (pageW - gap * 7) / 8 else (maxWidth - gap * (GRID_COLS - 1)) / GRID_COLS
-        val innerW = if (scrolling) pageW * pages + gap * (pages - 1) else maxWidth
+        val cellW = (pageW - gap * (shown - 1)) / shown
+        val innerW = if (scrolling) cellW * GRID_COLS + gap * (GRID_COLS - 1) else maxWidth
         // przewijanie po kawałku: po puszczeniu przyciąga do najbliższej kolumny, nie do całej strony
         val colStep = with(density) { (cellW + gap).toPx() }
         androidx.compose.runtime.LaunchedEffect(scroll.isScrollInProgress, scrolling, edit) {
@@ -260,7 +303,7 @@ fun BlockGrid(
             if (scrolling) {
                 val x = (s.c * colStep).toInt()
                 if (x < scroll.value || x + s.w * colStep > scroll.value + with(density) { pageW.toPx() })
-                    scroll.animateScrollTo((x - colStep.toInt() * (8 - s.w).coerceAtLeast(0) / 2).coerceIn(0, scroll.maxValue))
+                    scroll.animateScrollTo((x - colStep.toInt() * (shown - s.w).coerceAtLeast(0) / 2).coerceIn(0, scroll.maxValue))
             }
         }
         // przesunięcie stron dla tła (wygląd z ukośnym światłem przesuwa je wolniej niż klocki)
@@ -447,7 +490,7 @@ fun BlockGrid(
         if (scrolling) {
             // pasek przewijania na dole: jaka część całej siatki jest widoczna i gdzie
             val trackW = d(240)
-            val thumbW = trackW / pages
+            val thumbW = trackW * shown / GRID_COLS
             val frac = if (scroll.maxValue > 0) scroll.value.toFloat() / scroll.maxValue else 0f
             Box(Modifier.align(Alignment.BottomCenter).offset(y = gap * 0.9f).size(trackW, d(8)).clip(RoundedCornerShape(d(4))).background(Dim.copy(alpha = 0.3f))) {
                 Box(Modifier.offset(x = (trackW - thumbW) * frac).size(thumbW, d(8)).clip(RoundedCornerShape(d(4))).background(Txt.copy(alpha = 0.8f)))

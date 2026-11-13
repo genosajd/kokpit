@@ -34,6 +34,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.OpenInFull
 import androidx.compose.material.icons.outlined.AcUnit
 import androidx.compose.material.icons.outlined.DirectionsCar
 import androidx.compose.material.icons.outlined.Lightbulb
@@ -247,7 +248,11 @@ fun LauncherScreen(act: MainActivity) {
                 }
                 .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.displayCutout))
         ) {
-            val u = minOf(maxWidth / 2560f, maxHeight / 720f)
+            // węższy ekran = mniej kolumn naraz, a nie mniejsze klocki: skala liczona od szerokości tylu kolumn
+            val cols = GridGeom.colsFor(maxWidth.value, maxHeight.value)
+            androidx.compose.runtime.SideEffect { if (GridGeom.cols.intValue != cols) GridGeom.cols.intValue = cols }
+            LaunchedEffect(cols) { if (Prefs.layout.isNullOrBlank()) act.layout.value = LayoutStore.defaultFor(cols) }
+            val u = minOf(maxWidth / (320f * cols), maxHeight / (360f * GRID_ROWS))
             if (animate) Aurora()
             CompositionLocalProvider(LocalU provides u) {
                 Column(Modifier.fillMaxSize().padding(horizontal = d(28))) {
@@ -258,7 +263,7 @@ fun LauncherScreen(act: MainActivity) {
                                 if (next != null) act.saveLayout(next)
                                 else android.widget.Toast.makeText(act, "Brak miejsca – zmniejsz albo schowaj klocek, albo dodaj stronę ekranu (Ustawienia → Ekran)", android.widget.Toast.LENGTH_LONG).show()
                             },
-                            onReset = { act.saveLayout(LayoutStore.DEFAULT) },
+                            onReset = { act.saveLayout(LayoutStore.defaultFor(GridGeom.cols.intValue)) },
                             onStore = {
                                 act.storeLayout()
                                 android.widget.Toast.makeText(act, "Zapisano układ – „Przywróć zapisany” wróci do niego", android.widget.Toast.LENGTH_SHORT).show()
@@ -416,12 +421,13 @@ private val OK_KEYS = setOf(Key.Enter, Key.NumPadEnter, Key.DirectionCenter)
  * Musi stać w łańcuchu przed clickable/focusable, żeby widzieć jego fokus.
  * fill = false: bez tła (np. kafelek „Dodaj”), active = element włączony (np. „3D”).
  */
-fun Modifier.kokpitSurface(radius: Dp, fill: Boolean = true, active: Boolean = false): Modifier = composed {
+/** [field] = pole tekstowe: przy wpisywaniu nie rośnie, nie pulsuje i nie zmienia tła – zostaje tylko obwódka wyboru. */
+fun Modifier.kokpitSurface(radius: Dp, fill: Boolean = true, active: Boolean = false, field: Boolean = false): Modifier = composed {
     val t = LocalTheme.current
     var focused by remember { mutableStateOf(false) }
     val shape = t.shape(radius)
     val ring = d(3)
-    val pulse = if (focused && LocalAnimate.current) loop(1600) else null
+    val pulse = if (focused && !field && LocalAnimate.current) loop(1600) else null
     // naciśnięcie: element się wciska i rozjaśnia, żeby było widać, że dotyk zadziałał
     var pressed by remember { mutableStateOf(false) }
     val press by androidx.compose.animation.core.animateFloatAsState(
@@ -447,15 +453,15 @@ fun Modifier.kokpitSurface(radius: Dp, fill: Boolean = true, active: Boolean = f
         }
         .graphicsLayer {
             // delikatne powiększenie przy wyborze pokrętłem (w wyglądzie animowanym „oddycha”) i wciśnięcie przy dotyku
-            val grow = if (focused && t.selectedGrow) 1.03f + 0.015f * (pulse?.value ?: 0f) else 1f
-            val sc = grow * (1f - 0.07f * press)
+            val grow = if (focused && !field && t.selectedGrow) 1.03f + 0.015f * (pulse?.value ?: 0f) else 1f
+            val sc = grow * (1f - (if (field) 0f else 0.07f) * press)
             scaleX = sc; scaleY = sc
         }
         .clip(shape)
         .then(
             when {
                 // wybór: przezroczysty kolor wyboru na zwykłym tle elementu
-                focused -> Modifier.background(if (fill) t.surface else SolidColor(Color.Transparent)).background(t.selected)
+                focused && !field -> Modifier.background(if (fill) t.surface else SolidColor(Color.Transparent)).background(t.selected)
                 active -> Modifier.background(t.active)
                 fill -> Modifier.background(t.surface)
                 else -> Modifier
@@ -484,7 +490,7 @@ fun Pill(icon: ImageVector?, text: String, color: Color = Txt, active: Boolean =
     ) {
         if (icon != null) {
             Icon(icon, null, tint = color, modifier = Modifier.size(d(28)))
-            Spacer(Modifier.width(d(10)))
+            if (text.isNotEmpty()) Spacer(Modifier.width(d(10)))
         }
         Text(text, color = color, fontSize = s(22), fontWeight = FontWeight.Medium)
     }
@@ -508,14 +514,20 @@ fun StatusBar(onSettings: () -> Unit, onEdit: () -> Unit) {
     val outside = car.outsideC?.let { String.format(Locale("pl", "PL"), "%.1f°C", it) } ?: weather?.let { "${it.temp}°C" }
 
     Row(Modifier.fillMaxWidth().height(d(76)), verticalAlignment = Alignment.CenterVertically) {
-        Text(time, color = Txt, fontSize = s(36), fontWeight = FontWeight.Medium)
-        Spacer(Modifier.width(d(26)))
-        Text(date, color = Dim, fontSize = s(26))
+        // węższy ekran: bez daty, potem przyciski bez napisów
+        val cols = GridGeom.cols.intValue
+        val wide = cols >= 7
+        val labels = cols >= 6
+        Text(time, color = Txt, fontSize = s(36), fontWeight = FontWeight.Medium, maxLines = 1)
+        if (wide) {
+            Spacer(Modifier.width(d(26)))
+            Text(date, color = Dim, fontSize = s(26), maxLines = 1)
+        }
         if (outside != null) {
             Spacer(Modifier.width(d(30)))
             weather?.let { Icon(weatherIcon(it.code), null, tint = Warn, modifier = Modifier.size(d(30))) }
             Spacer(Modifier.width(d(8)))
-            Text(outside, color = Dim, fontSize = s(26))
+            Text(outside, color = Dim, fontSize = s(26), maxLines = 1)
         }
         Spacer(Modifier.weight(1f))
         SystemIcons()
@@ -523,11 +535,11 @@ fun StatusBar(onSettings: () -> Unit, onEdit: () -> Unit) {
         VolumeControl()
         Spacer(Modifier.width(d(14)))
         val ctx = LocalContext.current
-        Pill(Icons.Outlined.Tune, "Radio", onClick = { openRadioSettings(ctx) })
+        Pill(Icons.Outlined.Tune, if (labels) "Radio" else "", onClick = { openRadioSettings(ctx) })
         Spacer(Modifier.width(d(14)))
-        Pill(Icons.Outlined.DashboardCustomize, "Układ", onClick = onEdit)
+        Pill(Icons.Outlined.DashboardCustomize, if (labels) "Układ" else "", onClick = onEdit)
         Spacer(Modifier.width(d(14)))
-        Pill(Icons.Outlined.Settings, "Ustawienia", onClick = onSettings)
+        Pill(Icons.Outlined.Settings, if (labels) "Ustawienia" else "", onClick = onSettings)
     }
 }
 
@@ -535,16 +547,19 @@ fun StatusBar(onSettings: () -> Unit, onEdit: () -> Unit) {
 @Composable
 fun EditBar(slots: List<Slot>, onAdd: (BlockId) -> Unit, onReset: () -> Unit, onStore: () -> Unit, onRestore: (() -> Unit)?, onDone: () -> Unit) {
     Row(Modifier.fillMaxWidth().height(d(76)), verticalAlignment = Alignment.CenterVertically) {
-        Text("Przeciągnij klocek · niebieski uchwyt zmienia rozmiar", color = Dim, fontSize = s(24))
-        Spacer(Modifier.width(d(30)))
+        val cols = GridGeom.cols.intValue
+        if (cols >= 8) {
+            Text("Przeciągnij klocek · niebieski uchwyt zmienia rozmiar", color = Dim, fontSize = s(24))
+            Spacer(Modifier.width(d(30)))
+        }
         var picker by remember { mutableStateOf(false) }
         Pill(Icons.Outlined.Add, "Widżety", onClick = { picker = true })
         if (picker) BlockPickerDialog(slots, onAdd = { picker = false; onAdd(it) }, onClose = { picker = false })
         Spacer(Modifier.weight(1f))
-        Pill(Icons.Outlined.Save, "Zapisz układ", onClick = onStore)
+        Pill(Icons.Outlined.Save, if (cols >= 6) "Zapisz układ" else "", onClick = onStore)
         Spacer(Modifier.width(d(14)))
         if (onRestore != null) {
-            Pill(Icons.Outlined.Restore, "Przywróć zapisany", onClick = onRestore)
+            Pill(Icons.Outlined.Restore, if (cols >= 6) "Przywróć zapisany" else "", onClick = onRestore)
             Spacer(Modifier.width(d(14)))
         }
         Pill(null, "Domyślny", onClick = onReset)
@@ -1290,20 +1305,25 @@ fun ClimateBlock(modifier: Modifier, slot: Slot, act: MainActivity, onSettings: 
                     Text(err ?: "Łączenie z Tuya…", color = if (err != null) Warn else Dim, fontSize = s(20))
                 }
                 else -> {
-                    Spacer(Modifier.weight(1f))
+                    // niski blok: temperatura zaraz pod nagłówkiem i ciasno, żeby tryb nie nachodził na przyciski
+                    val low = slot.h == 1
+                    if (low) Spacer(Modifier.height(d(4))) else Spacer(Modifier.weight(1f))
                     // temperatura z czujnika w pokoju (dokładniejsza), czujnik klimatyzatora mniejszym tekstem
                     val room = sens?.temp
-                    Row(verticalAlignment = Alignment.Bottom) {
+                    val big = s(if (low) 60 else 92)
+                    Row(verticalAlignment = if (low) Alignment.CenterVertically else Alignment.Bottom) {
                         Text((room ?: s0.room)?.let { if (room != null) "%.1f°".format(it).replace('.', ',') else "${it.toInt()}°" } ?: "–",
-                            color = Txt, fontSize = s(if (slot.h > 1) 92 else 64), fontWeight = FontWeight.Light)
-                        Column(Modifier.padding(start = d(14), bottom = d(14))) {
-                            Text("w domu", color = Dim, fontSize = s(18))
-                            (sens?.humidity ?: s0.humidity)?.let { Text("wilg. $it %", color = Dim, fontSize = s(18)) }
-                            if (room != null && s0.room != null) Text("klima ${s0.room.toInt()}°", color = Dim, fontSize = s(18))
+                            color = Txt, fontSize = big, fontWeight = FontWeight.Light, maxLines = 1,
+                            style = if (low) androidx.compose.ui.text.TextStyle(lineHeight = big,
+                                platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)) else androidx.compose.ui.text.TextStyle.Default)
+                        Column(Modifier.padding(start = d(14), bottom = if (low) 0.dp else d(14))) {
+                            if (!low) Text("w domu", color = Dim, fontSize = s(18))
+                            (sens?.humidity ?: s0.humidity)?.let { Text("wilg. $it %", color = Dim, fontSize = s(18), maxLines = 1) }
+                            if (room != null && s0.room != null) Text("klima ${s0.room.toInt()}°", color = Dim, fontSize = s(18), maxLines = 1)
                         }
                     }
                     // tryb jako przycisk: dotknięcie otwiera wybór (grzanie, chłodzenie, auto…)
-                    Row(Modifier.padding(top = d(6)), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.padding(top = if (low) d(2) else d(6)), verticalAlignment = Alignment.CenterVertically) {
                         Row(
                             Modifier.kokpitSurface(d(14), active = s0.on).combinedClickable(onClick = { picker = "mode" })
                                 .padding(horizontal = d(12), vertical = d(6)),
@@ -1384,13 +1404,19 @@ fun AssistantBlock(modifier: Modifier, slot: Slot, act: MainActivity, onSettings
         Assistant.send(act, input)
         input = ""
     }
+    var big by remember { mutableStateOf(false) }
+    if (big) ChatDialog(act, onSettings) { big = false }
     Block(modifier) {
         Column(Modifier.fillMaxSize().padding(d(22))) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(d(8))) {
                 Box(Modifier.weight(1f)) { Label(Icons.Outlined.SmartToy, "Asystent · " + Assistant.providerName()) }
                 val tok by Assistant.tokens
                 if (tok > 0 && slot.w > 1) Text(tokensText(tok) + " / " + tokensText(Prefs.aiTokenLimit.toLong()), color = Dim, fontSize = s(17),
-                    modifier = Modifier.padding(end = d(12)))
+                    modifier = Modifier.padding(end = d(4)))
+                // rozmowa w dużym oknie
+                Box(Modifier.size(d(56)).kokpitSurface(d(14)).combinedClickable(onClick = { big = true }), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Outlined.OpenInFull, "Rozmowa w dużym oknie", tint = Txt, modifier = Modifier.size(d(30)))
+                }
                 // odświeżenie sesji: czysta rozmowa (inaczej zostaje też po restarcie radia)
                 if (lines.isNotEmpty()) Box(Modifier.size(d(56)).kokpitSurface(d(14))
                     .combinedClickable(onClick = { act.stopSpeaking(); Assistant.reset() }), contentAlignment = Alignment.Center) {
@@ -1409,21 +1435,7 @@ fun AssistantBlock(modifier: Modifier, slot: Slot, act: MainActivity, onSettings
                         }
                     }
                 } else {
-                    androidx.compose.foundation.lazy.LazyColumn(state = list, verticalArrangement = Arrangement.spacedBy(d(10)), modifier = Modifier.fillMaxSize()) {
-                        items(lines.size) { i ->
-                            val l = lines[i]
-                            Box(Modifier.fillMaxWidth(), contentAlignment = if (l.fromUser) Alignment.CenterEnd else Alignment.CenterStart) {
-                                Text(
-                                    if (l.fromUser) l.text else Speech.plain(l.text), color = if (l.fromUser) LocalTheme.current.activeText else Txt, fontSize = s(22), lineHeight = s(30),
-                                    modifier = Modifier.fillMaxWidth(0.88f).wrapContentWidth(if (l.fromUser) Alignment.End else Alignment.Start)
-                                        .then(if (l.fromUser) Modifier.kokpitSurface(d(16), active = true) else Modifier.kokpitSurface(d(16)))
-                                        .combinedClickable(onClick = {}, onLongClick = { if (!l.fromUser) act.speak(l.text) })
-                                        .padding(horizontal = d(16), vertical = d(10)),
-                                )
-                            }
-                        }
-                        if (busy) item { Text("Myślę…", color = Dim, fontSize = s(20), modifier = Modifier.padding(start = d(8))) }
-                    }
+                    ChatLines(act, list, busy, 0.88f)
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(d(10))) {
@@ -1434,7 +1446,7 @@ fun AssistantBlock(modifier: Modifier, slot: Slot, act: MainActivity, onSettings
                         cursorBrush = SolidColor(Accent),
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send),
                         keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { send() }),
-                        modifier = Modifier.weight(1f).kokpitSurface(d(16)).padding(horizontal = d(16), vertical = d(16)),
+                        modifier = Modifier.weight(1f).kokpitSurface(d(16), field = true).padding(horizontal = d(16), vertical = d(16)),
                         decorationBox = { inner ->
                             Box { if (input.isEmpty()) Text("Napisz…", color = Dim, fontSize = s(22)); inner() }
                         },
@@ -1455,6 +1467,80 @@ fun AssistantBlock(modifier: Modifier, slot: Slot, act: MainActivity, onSettings
                 ) { Icon(Icons.Outlined.Mic, "Mów", tint = if (input.isBlank()) LocalTheme.current.activeText else Accent, modifier = Modifier.size(d(34))) }
             }
         }
+    }
+}
+
+/** Wiadomości rozmowy: dotknięcie kopiuje treść do schowka, przytrzymanie odpowiedzi czyta ją na głos. */
+@Composable
+private fun ChatLines(act: MainActivity, list: androidx.compose.foundation.lazy.LazyListState, busy: Boolean, bubble: Float) {
+    val lines = Assistant.lines
+    androidx.compose.foundation.lazy.LazyColumn(state = list, verticalArrangement = Arrangement.spacedBy(d(10)), modifier = Modifier.fillMaxSize()) {
+        items(lines.size) { i ->
+            val l = lines[i]
+            val shown = if (l.fromUser) l.text else Speech.plain(l.text)
+            Box(Modifier.fillMaxWidth(), contentAlignment = if (l.fromUser) Alignment.CenterEnd else Alignment.CenterStart) {
+                Text(
+                    shown, color = if (l.fromUser) LocalTheme.current.activeText else Txt, fontSize = s(22), lineHeight = s(30),
+                    modifier = Modifier.fillMaxWidth(bubble).wrapContentWidth(if (l.fromUser) Alignment.End else Alignment.Start)
+                        .then(if (l.fromUser) Modifier.kokpitSurface(d(16), active = true) else Modifier.kokpitSurface(d(16)))
+                        .combinedClickable(onClick = { copyText(act, shown) }, onLongClick = { if (!l.fromUser) act.speak(l.text) })
+                        .padding(horizontal = d(16), vertical = d(10)),
+                )
+            }
+        }
+        if (busy) item { Text("Myślę…", color = Dim, fontSize = s(20), modifier = Modifier.padding(start = d(8))) }
+    }
+}
+
+private fun copyText(act: MainActivity, text: String) {
+    runCatching {
+        act.getSystemService(android.content.ClipboardManager::class.java)
+            .setPrimaryClip(android.content.ClipData.newPlainText("Kokpit – asystent", text))
+        // Android 13+ sam pokazuje potwierdzenie skopiowania
+        if (android.os.Build.VERSION.SDK_INT < 33) android.widget.Toast.makeText(act, "Skopiowano", android.widget.Toast.LENGTH_SHORT).show()
+    }
+}
+
+/** Rozmowa z asystentem w dużym oknie – ta sama co w bloku. Pole pisania jest u góry, żeby klawiatura go nie zasłaniała. */
+@Composable
+fun ChatDialog(act: MainActivity, onSettings: () -> Unit, onClose: () -> Unit) {
+    val lines = Assistant.lines
+    val busy by Assistant.busy
+    var input by remember { mutableStateOf("") }
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    LaunchedEffect(lines.size, busy) { if (lines.isNotEmpty()) list.animateScrollToItem(lines.size - 1 + if (busy) 1 else 0) }
+    fun send() {
+        if (input.isBlank()) return
+        Assistant.send(act, input)
+        input = ""
+    }
+    Sheet("Asystent · " + Assistant.providerName(), onClose) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(d(10))) {
+            androidx.compose.foundation.text.BasicTextField(
+                input, { input = it }, singleLine = true,
+                textStyle = TextStyle(color = Txt, fontSize = s(22)),
+                cursorBrush = SolidColor(Accent),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { send() }),
+                modifier = Modifier.weight(1f).kokpitSurface(d(16), field = true).padding(horizontal = d(16), vertical = d(16)),
+                decorationBox = { inner -> Box { if (input.isEmpty()) Text("Napisz…", color = Dim, fontSize = s(22)); inner() } },
+            )
+            if (input.isNotBlank()) Box(Modifier.size(d(64)).kokpitSurface(d(16), active = true).combinedClickable(onClick = { send() }), contentAlignment = Alignment.Center) {
+                Icon(Icons.AutoMirrored.Outlined.Send, "Wyślij", tint = LocalTheme.current.activeText, modifier = Modifier.size(d(32)))
+            }
+            Box(Modifier.size(d(64)).kokpitSurface(d(16), active = input.isBlank()).combinedClickable(onClick = {
+                act.stopSpeaking()
+                if (!Assistant.hasKey()) { onClose(); onSettings() } else VoiceActivity.start(act)
+            }), contentAlignment = Alignment.Center) {
+                Icon(Icons.Outlined.Mic, "Mów", tint = if (input.isBlank()) LocalTheme.current.activeText else Accent, modifier = Modifier.size(d(34)))
+            }
+            if (lines.isNotEmpty()) Box(Modifier.size(d(64)).kokpitSurface(d(16)).combinedClickable(onClick = { act.stopSpeaking(); Assistant.reset() }), contentAlignment = Alignment.Center) {
+                Icon(Icons.Outlined.RestartAlt, "Nowa rozmowa", tint = Txt, modifier = Modifier.size(d(34)))
+            }
+        }
+        Spacer(Modifier.height(d(16)))
+        if (lines.isEmpty() && !busy) Text(if (Assistant.hasKey()) "Zapytaj o cokolwiek albo poproś o trasę" else "Wpisz klucz API: Ustawienia → Asystent AI", color = Dim, fontSize = s(22))
+        else ChatLines(act, list, busy, 0.8f)
     }
 }
 
