@@ -25,6 +25,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Mic
@@ -227,6 +228,15 @@ fun SettingsDialog(
     editRule?.let { (r, isNew) -> RuleDialog(r, isNew, act) { editRule = null } }
     var backup by remember { mutableStateOf<BackupAction?>(null) }
     backup?.let { BackupConfirm(it, act) { backup = null } }
+    var mediaDefault by remember { mutableStateOf(Prefs.mediaDefault) }
+    var mediaPick by remember { mutableStateOf(false) }
+    if (mediaPick) {
+        val players = remember { MediaHub.loadable(act).let { ok -> apps.filter { it.packageName in ok }.distinctBy { it.packageName } } }
+        AppPickerDialog(if (players.isEmpty()) "Brak odtwarzaczy, które da się załadować w tle" else "Domyślny odtwarzacz", players, onClose = { mediaPick = false }) { key ->
+            val pkg = android.content.ComponentName.unflattenFromString(key)?.packageName.orEmpty()
+            Prefs.mediaDefault = pkg; mediaDefault = pkg; MediaHub.defaultChanged(); mediaPick = false
+        }
+    }
     if (phraseDlg) HotwordPhraseDialog { phraseDlg = false; phrase = Prefs.hotwordPhrase }
     var tokenLimit by remember { mutableStateOf(Prefs.aiTokenLimit) }
     val ttsEngine = Prefs.ttsEngine
@@ -269,7 +279,7 @@ fun SettingsDialog(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("Kokpit F11 0.3.20", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
+                Text("Kokpit F11 0.3.21", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
             }
             Spacer(Modifier.width(d(26)))
             LazyVerticalGrid(
@@ -333,6 +343,18 @@ fun SettingsDialog(
                         Prefs.gridPages = next
                         // bloki z usuniętych stron znikają (można je dodać ponownie w edycji)
                         act.saveLayout(act.layout.value.filter { it.inBounds })
+                    }
+                }
+                item {
+                    val def = mediaDefault
+                    val name = apps.firstOrNull { it.packageName == def }?.label
+                    SettingTile(Icons.Outlined.MusicNote, "Domyślny odtwarzacz: ${name ?: "brak"}",
+                        if (def.isEmpty()) "Wybierz aplikację, którą blok Multimedia ma załadować po starcie radia"
+                        else "Blok Multimedia ładuje go po starcie radia (nie włącza muzyki); dotknij, aby zmienić") { mediaPick = true }
+                }
+                if (mediaDefault.isNotEmpty()) item {
+                    SettingTile(Icons.Outlined.Close, "Bez domyślnego odtwarzacza", "Blok Multimedia pokazuje tylko to, co gra albo grało ostatnio") {
+                        Prefs.mediaDefault = ""; mediaDefault = ""; MediaHub.defaultChanged()
                     }
                 }
                 item { SettingTile(Icons.Outlined.DashboardCustomize, "Edytuj układ bloków", "Przesuwanie, rozmiar, ukrywanie – tylko na postoju") { onEditLayout() } }

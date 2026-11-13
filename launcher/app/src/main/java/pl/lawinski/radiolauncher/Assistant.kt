@@ -101,12 +101,13 @@ private object AssistantTools {
         ),
         Def(
             "media_control",
-            "Steruje odtwarzaczem w radiu (YouTube, SoundCloud, Spotify…) tak jak przyciski w widżecie odtwarzacza: status = co teraz leci, play = wznów odtwarzanie, pause, next, previous. Prośby typu „wznów / puść dalej / włącz SoundCloud z powrotem” to play tutaj – NIE otwieraj aplikacji przez open_app. Aplikację otwórz tylko, gdy to narzędzie zwróci, że nie da się wznowić.",
+            "Steruje odtwarzaczem w radiu (YouTube, SoundCloud, Spotify…) tak jak przyciski w widżecie odtwarzacza: status = co teraz leci, w którym miejscu i ile trwa; play = wznów albo włącz odtwarzanie w tle (aplikacja nie pokazuje się na ekranie); pause, next, previous; seek_by = przewiń o tyle sekund (ujemne = do tyłu); seek_to = ustaw na danej sekundzie od początku (0 = od początku). Prośby typu „wznów / puść dalej / włącz SoundCloud / puść muzykę z SoundCloud” to play tutaj z nazwą w app – NIE otwieraj aplikacji przez open_app. Aplikację otwórz tylko, gdy to narzędzie zwróci, że nie da się włączyć, albo gdy ktoś chce ją zobaczyć.",
             mapOf(
-                "action" to mapOf("type" to "string", "enum" to listOf("status", "play", "pause", "next", "previous")),
+                "action" to mapOf("type" to "string", "enum" to listOf("status", "play", "pause", "next", "previous", "seek_by", "seek_to")),
                 "app" to mapOf("type" to "string", "description" to "Którego odtwarzacza dotyczy, np. SoundCloud; pusty tekst = ten, który gra albo grał ostatnio"),
+                "seconds" to mapOf("type" to "integer", "description" to "Dla seek_by: o ile sekund przewinąć (10 minut = 600, do tyłu ujemne); dla seek_to: sekunda od początku (45. minuta = 2700); inaczej 0"),
             ),
-            listOf("action", "app"),
+            listOf("action", "app", "seconds"),
         ),
         Def(
             "camera_snapshot",
@@ -230,7 +231,7 @@ private object AssistantTools {
             "Nawigacja uruchomiona"
         }
         "play_youtube" -> playYoutube(act, input.optString("query").trim())
-        "media_control" -> mediaControl(act, input.optString("action"), input.optString("app").trim())
+        "media_control" -> mediaControl(act, input.optString("action"), input.optString("app").trim(), input.optLong("seconds"))
         "camera_control" -> cameraControl(act, input)
         "calendar" -> calendar(act, input)
         "slack" -> Slack.run(input)
@@ -279,31 +280,93 @@ private object AssistantTools {
     }
 
     /** Sterowanie odtwarzaczem przez MediaSession; wymaga dostępu do powiadomień (ten sam co trasa z Map). */
-    private fun mediaControl(act: MainActivity, action: String, wanted: String): String {
+    private fun clock(ms: Long): String {
+        val s = (ms / 1000).coerceAtLeast(0)
+        return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
+    }
+
+    /** Pozycja odtwarzania teraz (stan sesji podaje ją z chwili ostatniej zmiany). */
+    private fun position(st: android.media.session.PlaybackState?): Long {
+        st ?: return 0
+        if (st.state != android.media.session.PlaybackState.STATE_PLAYING || st.lastPositionUpdateTime <= 0) return st.position
+        val speed = st.playbackSpeed.takeIf { it > 0f } ?: 1f
+        return st.position + ((android.os.SystemClock.elapsedRealtime() - st.lastPositionUpdateTime) * speed).toLong()
+    }
+
+    private var browser: android.media.browse.MediaBrowser? = null
+
+    /**
+     * Włącza odtwarzanie w aplikacji, która nie ma sesji (nie działa albo dawno wstrzymana), bez pokazywania jej:
+     * łączy się z jej usługą multimediów (tak jak Android Auto) i wysyła „graj”. Zwraca false, gdy aplikacja
+     * nie ma takiej usługi albo nie wpuszcza Kokpitu.
+     */
+    private fun playInBackground(act: MainActivity, pkg: String): Boolean {
+        val service = runCatching {
+            act.packageManager.queryIntentServices(android.content.Intent("android.media.browse.MediaBrowserService").setPackage(pkg), 0)
+        }.getOrDefault(emptyList()).firstOrNull()?.serviceInfo ?: return false
+        val done = java.util.concurrent.CountDownLatch(1)
+        var ok = false
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        main.post {
+            runCatching { browser?.disconnect() }
+            var b: android.media.browse.MediaBrowser? = null
+            b = android.media.browse.MediaBrowser(act, android.content.ComponentName(service.packageName, service.name),
+                object : android.media.browse.MediaBrowser.ConnectionCallback() {
+                    override fun onConnected() {
+                        ok = runCatching {
+                            android.media.session.MediaController(act, b!!.sessionToken).transportControls.play()
+                        }.isSuccess
+                        done.countDown()
+                    }
+                    override fun onConnectionFailed() = done.countDown()
+                    override fun onConnectionSuspended() = done.countDown()
+                }, null)
+            browser = b
+            runCatching { b.connect() }.onFailure { done.countDown() }
+            // połączenie trzyma usługę odtwarzacza przy życiu, aż sama zacznie grać na pierwszym planie
+            main.postDelayed({ if (browser === b) { runCatching { b.disconnect() }; browser = null } }, 20000)
+        }
+        done.await(8, java.util.concurrent.TimeUnit.SECONDS)
+        android.util.Log.i("KokpitMedia", "w tle $pkg: ${if (ok) "wysłano graj" else "brak połączenia z usługą"}")
+        return ok
+    }
+
+    private fun mediaControl(act: MainActivity, action: String, wanted: String, seconds: Long): String {
         val pm = act.packageManager
         fun label(pkg: String) = runCatching { pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg)
         fun matches(pkg: String) = wanted.isEmpty() || label(pkg).contains(wanted, true) || pkg.contains(wanted.replace(" ", ""), true)
-        val sessions = if (NavListener.isEnabled(act)) runCatching {
+        fun active() = if (NavListener.isEnabled(act)) runCatching {
             act.getSystemService(android.media.session.MediaSessionManager::class.java)
                 .getActiveSessions(android.content.ComponentName(act, NavListener::class.java))
         }.getOrDefault(emptyList()) else emptyList()
+        val sessions = active()
         val playingState = android.media.session.PlaybackState.STATE_PLAYING
         val s = sessions.filter { matches(it.packageName) }.let { list ->
             list.firstOrNull { it.playbackState?.state == playingState } ?: list.firstOrNull()
         }
         if (s == null) {
             if (action == "status") return if (sessions.isEmpty()) "Żaden odtwarzacz nie jest otwarty" else "Otwarte odtwarzacze: " + sessions.joinToString { label(it.packageName) }
-            // brak aktywnej sesji (np. odtwarzacz długo wstrzymany): przycisk multimediów jak w widżecie –
-            // Android przekazuje go ostatniemu odtwarzaczowi, który sam wznawia muzykę bez otwierania aplikacji
+            if (action == "seek_by" || action == "seek_to") return "Nie ma czego przewijać – ${if (wanted.isEmpty()) "żaden odtwarzacz" else wanted} teraz nie gra. Najpierw włącz odtwarzanie (play)."
+            val target = wanted.takeIf { it.isNotEmpty() }?.let { w -> act.apps.value.firstOrNull { it.label.contains(w, true) }?.packageName }
+                ?: Prefs.lastMediaPkg.takeIf { wanted.isEmpty() && it.isNotEmpty() }
+            if (wanted.isNotEmpty() && target == null) return "Nie ma w radiu aplikacji „$wanted”"
+            fun playsNow() = active().any { it.playbackState?.state == playingState && (target == null || it.packageName == target) }
+            fun waitPlaying(ms: Long): Boolean {
+                val until = android.os.SystemClock.elapsedRealtime() + ms
+                while (android.os.SystemClock.elapsedRealtime() < until) { if (playsNow()) return true; Thread.sleep(300) }
+                return playsNow()
+            }
+            val name = target?.let(::label) ?: "ostatniego odtwarzacza"
+            // 1. usługa multimediów aplikacji – działa też, gdy aplikacja w ogóle nie jest uruchomiona
+            if (action == "play" && target != null && playInBackground(act, target) && waitPlaying(6000)) return "$name gra w tle."
+            // 2. przycisk multimediów jak w widżecie – odtwarzacz sam wznawia muzykę bez otwierania aplikacji
             val code = when (action) {
                 "play" -> android.view.KeyEvent.KEYCODE_MEDIA_PLAY
                 "pause" -> android.view.KeyEvent.KEYCODE_MEDIA_PAUSE
                 "next" -> android.view.KeyEvent.KEYCODE_MEDIA_NEXT
                 else -> android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS
             }
-            val target = wanted.takeIf { it.isNotEmpty() }?.let { w -> act.apps.value.firstOrNull { it.label.contains(w, true) }?.packageName }
             if (target != null) {
-                // przycisk wprost do wybranej aplikacji (jej odbiornik przycisków multimediów)
                 for (a in listOf(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.ACTION_UP)) {
                     act.sendBroadcast(android.content.Intent(android.content.Intent.ACTION_MEDIA_BUTTON).setPackage(target)
                         .putExtra(android.content.Intent.EXTRA_KEY_EVENT, android.view.KeyEvent(a, code)))
@@ -313,26 +376,38 @@ private object AssistantTools {
                 am.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, code))
                 am.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, code))
             }
-            Thread.sleep(1500)
-            val nowPlaying = sessions.isEmpty() && NavListener.isEnabled(act) && runCatching {
-                act.getSystemService(android.media.session.MediaSessionManager::class.java)
-                    .getActiveSessions(android.content.ComponentName(act, NavListener::class.java))
-                    .any { it.playbackState?.state == playingState && matches(it.packageName) }
-            }.getOrDefault(false)
-            return "Wysłano przycisk $action do ${target?.let(::label) ?: "ostatniego odtwarzacza"}" +
-                if (nowPlaying) " – gra." else " (nie widać potwierdzenia; jeśli rozmówca powie, że nie gra, dopiero wtedy otwórz aplikację)."
+            val nowPlaying = NavListener.isEnabled(act) && waitPlaying(3000)
+            return if (nowPlaying) "$name gra w tle."
+            else "Wysłano przycisk $action do $name, ale nie widać, żeby grał. Jeśli rozmówca potwierdzi, że nie gra, otwórz aplikację przez open_app."
         }
         val app = label(s.packageName)
         val md = s.metadata
+        val st = s.playbackState
         val now = listOfNotNull(md?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE), md?.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)).joinToString(" – ")
-        val playing = s.playbackState?.state == playingState
+        val playing = st?.state == playingState
+        val length = md?.getLong(android.media.MediaMetadata.METADATA_KEY_DURATION) ?: 0L
         val t = s.transportControls
         when (action) {
             "play" -> t.play()
             "pause" -> t.pause()
             "next" -> t.skipToNext()
             "previous" -> t.skipToPrevious()
-            else -> return "$app: ${if (playing) "gra" else "wstrzymane"}${if (now.isNotBlank()) " – $now" else ""}"
+            "seek_by", "seek_to" -> {
+                if ((st?.actions ?: 0L) and android.media.session.PlaybackState.ACTION_SEEK_TO == 0L)
+                    return "$app nie pozwala teraz przewijać (np. transmisja na żywo albo reklama)"
+                var to = if (action == "seek_by") position(st) + seconds * 1000 else seconds * 1000
+                var note = ""
+                if (to < 0) to = 0
+                if (length > 0 && to > length - 3000) {
+                    if (action == "seek_to" || to >= length) note = " – dalej się nie da, całość trwa ${clock(length)}"
+                    to = (length - 3000).coerceAtLeast(0)
+                }
+                t.seekTo(to)
+                return "$app: ustawiono na ${clock(to)}" + (if (length > 0) " z ${clock(length)}" else "") + note + (if (now.isNotBlank()) " ($now)" else "")
+            }
+            else -> return "$app: ${if (playing) "gra" else "wstrzymane"}${if (now.isNotBlank()) " – $now" else ""}" +
+                (if (length > 0) "; miejsce ${clock(position(st))} z ${clock(length)}" else if (position(st) > 0) "; miejsce ${clock(position(st))}" else "") +
+                if ((st?.actions ?: 0L) and android.media.session.PlaybackState.ACTION_SEEK_TO == 0L) "; bez przewijania" else ""
         }
         return "$app: wykonano $action${if (now.isNotBlank()) " (było: $now)" else ""}"
     }
@@ -500,7 +575,7 @@ private object AssistantTools {
 private const val BASE_PROMPT = """Jesteś asystentem w aucie: ekran radia w BMW F11 Touring z launcherem Kokpit F11. Rozmawia z Tobą kierowca albo pasażer.
 Odpowiadaj po polsku, krótko i naturalnie, zwykle 1–3 zdaniami – odpowiedzi są czytane na głos, więc pisz zwykłym tekstem, bez list, nagłówków, tabel i znaczników Markdown.
 Kierowca nie powinien czytać długich tekstów w czasie jazdy, dlatego najważniejsze mów na początku.
-Masz narzędzia: car_status (stan auta, położenie, trasa), navigate i open_saved_place (włączają nawigację w Mapach Google), places (szuka miejsc w Google Maps z ocenami i godzinami otwarcia oraz podaje czas dojazdu z korkami – używaj zamiast zgadywania, gdy ktoś pyta o miejsca w pobliżu albo ile się jedzie), open_app (uruchamia aplikację w radiu i może w niej wyszukać), play_youtube (od razu odtwarza w YouTube to, o co ktoś prosi), media_control (pauza, wznowienie, następny, poprzedni, co teraz gra) i radio_control (głośność, jasność, ekran BMW iDrive, podzielony ekran, ustawienia, wygląd Kokpitu) camera_control (obrót kamery, punkty, zoom), home_ac (klimatyzator w domu: temperatura, wł./wył., ustawienie), calendar (kalendarz Google właściciela: terminy i dodawanie nowych), slack (Slack właściciela: nieprzeczytane, czytanie, szukanie i wysyłanie – zawsze z potwierdzeniem) i camera_snapshot (aktualne zdjęcie z kamery Xiaomi – gdy ktoś pyta, co widać na kamerze, zawsze zrób nowe zdjęcie). Gdy ktoś prosi o włączenie muzyki lub filmu, użyj play_youtube. Gdy pytanie dotyczy auta, paliwa, miejsca albo trasy, najpierw sprawdź car_status. Gdy ktoś prosi o trasę, od razu włącz nawigację i krótko to potwierdź."""
+Masz narzędzia: car_status (stan auta, położenie, trasa), navigate i open_saved_place (włączają nawigację w Mapach Google), places (szuka miejsc w Google Maps z ocenami i godzinami otwarcia oraz podaje czas dojazdu z korkami – używaj zamiast zgadywania, gdy ktoś pyta o miejsca w pobliżu albo ile się jedzie), open_app (uruchamia aplikację w radiu i może w niej wyszukać), play_youtube (od razu odtwarza w YouTube to, o co ktoś prosi), media_control (pauza, wznowienie, następny, poprzedni, co teraz gra, przewijanie o podany czas lub do podanego miejsca, włączenie wybranego odtwarzacza w tle) i radio_control (głośność, jasność, ekran BMW iDrive, podzielony ekran, ustawienia, wygląd Kokpitu) camera_control (obrót kamery, punkty, zoom), home_ac (klimatyzator w domu: temperatura, wł./wył., ustawienie), calendar (kalendarz Google właściciela: terminy i dodawanie nowych), slack (Slack właściciela: nieprzeczytane, czytanie, szukanie i wysyłanie – zawsze z potwierdzeniem) i camera_snapshot (aktualne zdjęcie z kamery Xiaomi – gdy ktoś pyta, co widać na kamerze, zawsze zrób nowe zdjęcie). Gdy ktoś prosi o włączenie muzyki lub filmu, użyj play_youtube. Gdy pytanie dotyczy auta, paliwa, miejsca albo trasy, najpierw sprawdź car_status. Gdy ktoś prosi o trasę, od razu włącz nawigację i krótko to potwierdź."""
 
 /** Prompt systemowy: stały opis roli + instrukcje właściciela z Ustawień (jak się zwracać, styl…). */
 private fun systemPrompt(): String {
@@ -706,6 +781,9 @@ private class OpenAiError(val code: Int, message: String) : Exception(message)
 
 /** Stan rozmowy widoczny w bloku; przetrwa zamknięcie bloku i zmianę układu. */
 object Assistant {
+    /** Do testów przez ADB (MainActivity.testHook): narzędzie asystenta bez pytania modelu. */
+    fun testTool(act: MainActivity, name: String, input: JSONObject): String = AssistantTools.run(act, name, input).text
+
     const val ANTHROPIC = "anthropic"
     const val OPENAI = "openai"
     const val DEFAULT_CLAUDE_MODEL = "claude-opus-5-5"

@@ -158,6 +158,70 @@ object MediaHub {
         return stream?.use { android.graphics.BitmapFactory.decodeStream(it) }
     }
 
+    // ── domyślny odtwarzacz: załadowany przez jego usługę multimediów (jak robi to Android Auto), bez pokazywania aplikacji ──
+    private var browser: android.media.browse.MediaBrowser? = null
+    private var loaded: MediaController? = null
+    private var loadedCb: MediaController.Callback? = null
+    private var loadedPkg = ""
+
+    private fun browserService(c: Context, pkg: String) = runCatching {
+        c.packageManager.queryIntentServices(Intent("android.media.browse.MediaBrowserService").setPackage(pkg), 0)
+    }.getOrDefault(emptyList()).firstOrNull()?.serviceInfo
+
+    /** Aplikacje, które da się załadować w tle (mają usługę multimediów). */
+    fun loadable(c: Context): Set<String> = runCatching {
+        c.packageManager.queryIntentServices(Intent("android.media.browse.MediaBrowserService"), 0).map { it.serviceInfo.packageName }.toSet()
+    }.getOrDefault(emptySet())
+
+    private fun unloadDefault() {
+        loaded?.let { c -> loadedCb?.let { cb -> runCatching { c.unregisterCallback(cb) } } }
+        runCatching { browser?.disconnect() }
+        browser = null; loaded = null; loadedCb = null; loadedPkg = ""
+    }
+
+    /** Łączy się z domyślnym odtwarzaczem, żeby był gotowy (tytuł, okładka, „graj”) zaraz po starcie radia. */
+    private fun loadDefault() {
+        val c = ctx ?: return
+        val pkg = Prefs.mediaDefault
+        if (pkg.isEmpty()) return unloadDefault()
+        if (browser != null && loadedPkg == pkg) return
+        unloadDefault()
+        val service = browserService(c, pkg) ?: return Unit.also { Log.i(TAG, "domyślny $pkg: brak usługi multimediów") }
+        loadedPkg = pkg
+        var b: android.media.browse.MediaBrowser? = null
+        b = android.media.browse.MediaBrowser(c, ComponentName(service.packageName, service.name),
+            object : android.media.browse.MediaBrowser.ConnectionCallback() {
+                override fun onConnected() {
+                    if (browser !== b) return
+                    val mc = runCatching { MediaController(c, b!!.sessionToken) }.getOrNull() ?: return
+                    val cb = object : MediaController.Callback() {
+                        override fun onPlaybackStateChanged(state: PlaybackState?) = pick()
+                        override fun onMetadataChanged(metadata: MediaMetadata?) = pick()
+                        override fun onSessionDestroyed() { if (loaded === mc) unloadDefault(); pick() }
+                    }
+                    runCatching { mc.registerCallback(cb, main) }
+                    loaded = mc; loadedCb = cb
+                    Log.i(TAG, "domyślny $pkg: załadowany")
+                    pick()
+                }
+                override fun onConnectionFailed() {
+                    Log.i(TAG, "domyślny $pkg: usługa nie wpuściła Kokpitu")
+                    if (browser === b) { browser = null; loadedPkg = "" }
+                }
+                override fun onConnectionSuspended() { if (browser === b) { unloadDefault(); pick() } }
+            }, null)
+        browser = b
+        runCatching { b.connect() }.onFailure { browser = null; loadedPkg = "" }
+    }
+
+    /** Po zmianie domyślnego odtwarzacza w Ustawieniach. */
+    fun defaultChanged() {
+        if (msm == null) return unloadDefault()
+        current = null
+        loadDefault()
+        pick()
+    }
+
     private val sessionsListener = MediaSessionManager.OnActiveSessionsChangedListener { setControllers(it.orEmpty()) }
 
     /** Zaczyna śledzić odtwarzacze; false = brak dostępu do powiadomień. */
@@ -171,6 +235,7 @@ object MediaHub {
             m.addOnActiveSessionsChangedListener(sessionsListener, cn, main)
             msm = m
             setControllers(m.getActiveSessions(cn))
+            loadDefault()
             true
         } catch (e: SecurityException) {
             showLast()
@@ -208,10 +273,16 @@ object MediaHub {
         if (msm == null) return
         val list = callbacks.values.map { it.first }
         val playing = list.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
-        val cur = current?.takeIf { c -> list.any { it.sessionToken == c.sessionToken } }
+        val def = Prefs.mediaDefault
+        // z domyślnym odtwarzaczem pomijamy sesje bez utworu (np. puste sesje Bluetooth po starcie radia)
+        fun real(c: MediaController) = def.isEmpty() || c === loaded || c.packageName == def ||
+            !c.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).isNullOrEmpty() ||
+            !c.metadata?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE).isNullOrEmpty()
+        val cur = current?.takeIf { c -> (c === loaded || list.any { it.sessionToken == c.sessionToken }) && real(c) }
         // system podaje sesje od ostatnio aktywnej
         val order = runCatching { msm?.getActiveSessions(ComponentName(ctx!!, NavListener::class.java)) }.getOrNull().orEmpty()
-        val c = playing ?: cur ?: order.firstOrNull()?.let { o -> list.firstOrNull { it.sessionToken == o.sessionToken } } ?: list.firstOrNull()
+        val recent = order.firstNotNullOfOrNull { o -> list.firstOrNull { it.sessionToken == o.sessionToken }?.takeIf(::real) }
+        val c = playing ?: cur ?: recent ?: loaded ?: list.firstOrNull()
         current = c
         if (c == null) return showLast()
         val md = c.metadata

@@ -31,7 +31,7 @@ object Access {
         Group("nav", "Nawigacja", "Włączanie trasy w Mapach Google", Icons.Outlined.Navigation, setOf("navigate", "open_saved_place")),
         Group("places", "Miejsca i trasy (Google)", "Szukanie miejsc w pobliżu, oceny, czas dojazdu z korkami", Icons.Outlined.Place, setOf("places")),
         Group("apps", "Aplikacje", "Uruchamianie aplikacji w radiu", Icons.Outlined.Apps, setOf("open_app")),
-        Group("media", "Muzyka i YouTube", "Odtwarzanie, pauza, następny utwór", Icons.Outlined.MusicNote, setOf("play_youtube", "media_control")),
+        Group("media", "Muzyka i YouTube", "Odtwarzanie, pauza, następny utwór, przewijanie", Icons.Outlined.MusicNote, setOf("play_youtube", "media_control")),
         Group("radio", "Radio", "Głośność, jasność, ekran iDrive, wygląd", Icons.Outlined.Radio, setOf("radio_control")),
         Group("camera", "Kamery", "Zdjęcia z kamer Xiaomi, obrót, zoom", Icons.Outlined.Videocam, setOf("camera_snapshot", "camera_control")),
         Group("home", "Dom (Tuya)", "Klimatyzator i czujnik w domu", Icons.Outlined.AcUnit, setOf("home_ac")),

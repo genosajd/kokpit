@@ -132,6 +132,10 @@ object Prefs {
     var lastMediaPkg: String
         get() = sp.getString("last_media_pkg", "") ?: ""
         set(v) = sp.edit().putString("last_media_pkg", v).apply()
+    /** domyślny odtwarzacz (pakiet) – blok Multimedia ładuje go po starcie, gdy nic innego nie gra; "" = brak */
+    var mediaDefault: String
+        get() = sp.getString("media_default", "") ?: ""
+        set(v) = sp.edit().putString("media_default", v).apply()
     var lastMediaTitle: String
         get() = sp.getString("last_media_title", "") ?: ""
         set(v) = sp.edit().putString("last_media_title", v).apply()
