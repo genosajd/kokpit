@@ -249,6 +249,16 @@ object Prefs {
         get() = sp.getInt("settings_ai_tab", 0)
         set(v) = sp.edit().putInt("settings_ai_tab", v).apply()
 
+    /** notes asystenta (Notes.kt), tablica JSON */
+    var aiNotes: String
+        get() = sp.getString("ai_notes", "[]") ?: "[]"
+        set(v) = sp.edit().putString("ai_notes", v).apply()
+
+    /** numer bieżącej rozmowy z asystentem (plik w files/assistant_chats) */
+    var aiSession: String
+        get() = sp.getString("ai_session", "") ?: ""
+        set(v) = sp.edit().putString("ai_session", v).apply()
+
     /** Własne instrukcje dla asystenta (dopisywane do promptu systemowego) */
     var aiInstructions: String
         get() = sp.getString("ai_instructions", "") ?: ""

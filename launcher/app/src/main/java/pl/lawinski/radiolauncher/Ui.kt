@@ -2,6 +2,11 @@
 
 package pl.lawinski.radiolauncher
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Delete
 import android.appwidget.AppWidgetHostView
 import android.content.Intent
 import android.os.Bundle
@@ -180,6 +185,7 @@ sealed interface Dlg {
     data object Voices : Dlg
     data class Custom(val field: CustomField) : Dlg
     data object Instructions : Dlg
+    data object Notes : Dlg
     data object Cameras : Dlg
     /** wybór widżetu do klocka „Widżet” nr n */
     data class Widgets(val n: Int) : Dlg
@@ -318,6 +324,7 @@ fun LauncherScreen(act: MainActivity) {
                         onVoices = { dialog = Dlg.Voices },
                         onCustom = { dialog = Dlg.Custom(it) },
                         onInstructions = { dialog = Dlg.Instructions },
+                        onNotes = { dialog = Dlg.Notes },
                         onCameras = { dialog = Dlg.Cameras },
                         onEditLayout = { dialog = null; edit = true },
                         onDemo = { demo = it },
@@ -344,6 +351,7 @@ fun LauncherScreen(act: MainActivity) {
                     is Dlg.Voices -> VoicePickerDialog(act, onClose = { dialog = Dlg.Settings })
                     is Dlg.Custom -> CustomizeDialog(dl.field, onClose = { dialog = Dlg.Settings })
                     is Dlg.Instructions -> InstructionsDialog(onClose = { dialog = Dlg.Settings })
+                    is Dlg.Notes -> NotesDialog(onClose = { dialog = Dlg.Settings })
                     is Dlg.Cameras -> CameraPickerDialog(act, onClose = { dialog = null })
                     is Dlg.TuyaDevices -> TuyaDevicePickerDialog(act, dl.n, onClose = { dialog = null })
                     is Dlg.Widgets -> WidgetPickerDialog(act, onClose = { dialog = null }) { provider ->
@@ -1472,8 +1480,7 @@ fun AssistantBlock(modifier: Modifier, slot: Slot, act: MainActivity, onSettings
 
 /** Wiadomości rozmowy: dotknięcie kopiuje treść do schowka, przytrzymanie odpowiedzi czyta ją na głos. */
 @Composable
-private fun ChatLines(act: MainActivity, list: androidx.compose.foundation.lazy.LazyListState, busy: Boolean, bubble: Float) {
-    val lines = Assistant.lines
+private fun ChatLines(act: MainActivity, list: androidx.compose.foundation.lazy.LazyListState, busy: Boolean, bubble: Float, lines: List<ChatLine> = Assistant.lines) {
     androidx.compose.foundation.lazy.LazyColumn(state = list, verticalArrangement = Arrangement.spacedBy(d(10)), modifier = Modifier.fillMaxSize()) {
         items(lines.size) { i ->
             val l = lines[i]
@@ -1514,7 +1521,61 @@ fun ChatDialog(act: MainActivity, onSettings: () -> Unit, onClose: () -> Unit) {
         Assistant.send(act, input)
         input = ""
     }
-    Sheet("Asystent · " + Assistant.providerName(), onClose) {
+    // 0 rozmowa, 1 lista zapisanych rozmów, 2 podgląd rozmowy tylko do odczytu
+    var mode by remember { mutableStateOf(0) }
+    var sessions by remember { mutableStateOf(emptyList<Assistant.Session>()) }
+    var viewed by remember { mutableStateOf(emptyList<ChatLine>()) }
+    var viewedTitle by remember { mutableStateOf("") }
+    var confirm by remember { mutableStateOf("") }
+    val tick = Assistant.sessionTick.intValue
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(mode, tick) { if (mode == 1) sessions = withContext(Dispatchers.IO) { Assistant.sessions() } }
+    Sheet(when (mode) { 1 -> "Rozmowy z asystentem"; 2 -> "Tylko do odczytu · $viewedTitle"; else -> "Asystent · " + Assistant.providerName() }, onClose) {
+        if (mode != 0) {
+            Box(Modifier.height(d(64)).kokpitSurface(d(16)).combinedClickable(onClick = { mode = if (mode == 2) 1 else 0 }).padding(horizontal = d(20)), contentAlignment = Alignment.Center) {
+                Text(if (mode == 2) "‹ Lista rozmów" else "‹ Wróć do rozmowy", color = Txt, fontSize = s(22))
+            }
+            Spacer(Modifier.height(d(16)))
+            if (mode == 2) {
+                ChatLines(act, androidx.compose.foundation.lazy.rememberLazyListState(), false, 0.8f, viewed)
+            } else if (sessions.isEmpty()) {
+                Text("Nie ma jeszcze zapisanych rozmów", color = Dim, fontSize = s(22))
+            } else androidx.compose.foundation.lazy.LazyColumn(verticalArrangement = Arrangement.spacedBy(d(10)), modifier = Modifier.fillMaxSize()) {
+                items(sessions.size) { i ->
+                    val x = sessions[i]
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(d(10))) {
+                        Column(Modifier.weight(1f).kokpitSurface(d(16), active = x.current).combinedClickable(onClick = {
+                            when {
+                                x.current -> mode = 0
+                                x.full -> scope.launch {
+                                    viewed = withContext(Dispatchers.IO) { Assistant.read(x.id) }
+                                    viewedTitle = x.title.take(40)
+                                    mode = 2
+                                }
+                                else -> { act.stopSpeaking(); if (Assistant.open(x.id)) mode = 0 }
+                            }
+                        }).padding(horizontal = d(18), vertical = d(12))) {
+                            val on = if (x.current) LocalTheme.current.activeText else Txt
+                            Text(x.title, color = on, fontSize = s(22), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                java.text.SimpleDateFormat("d.MM HH:mm", java.util.Locale("pl", "PL")).format(java.util.Date(x.updated)) +
+                                    " · ${x.count} wiad. · ${tokensText(x.tokens)} tokenów" +
+                                    (if (x.current) " · bieżąca" else "") +
+                                    (if (x.full) " · limit osiągnięty – tylko do odczytu" else if (!x.current) " · można wrócić" else ""),
+                                color = if (x.current) on else if (x.full) Accent else Dim, fontSize = s(18), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Box(Modifier.height(d(64)).kokpitSurface(d(16)).combinedClickable(onClick = {
+                            if (confirm == x.id) { Assistant.delete(x.id); confirm = "" } else confirm = x.id
+                        }).padding(horizontal = d(18)), contentAlignment = Alignment.Center) {
+                            if (confirm == x.id) Text("Usunąć?", color = Accent, fontSize = s(20))
+                            else Icon(Icons.Outlined.Delete, "Usuń rozmowę", tint = Txt, modifier = Modifier.size(d(32)))
+                        }
+                    }
+                }
+            }
+            return@Sheet
+        }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(d(10))) {
             androidx.compose.foundation.text.BasicTextField(
                 input, { input = it }, singleLine = true,
@@ -1536,6 +1597,9 @@ fun ChatDialog(act: MainActivity, onSettings: () -> Unit, onClose: () -> Unit) {
             }
             if (lines.isNotEmpty()) Box(Modifier.size(d(64)).kokpitSurface(d(16)).combinedClickable(onClick = { act.stopSpeaking(); Assistant.reset() }), contentAlignment = Alignment.Center) {
                 Icon(Icons.Outlined.RestartAlt, "Nowa rozmowa", tint = Txt, modifier = Modifier.size(d(34)))
+            }
+            Box(Modifier.size(d(64)).kokpitSurface(d(16)).combinedClickable(onClick = { confirm = ""; mode = 1 }), contentAlignment = Alignment.Center) {
+                Icon(Icons.Outlined.History, "Zapisane rozmowy", tint = Txt, modifier = Modifier.size(d(34)))
             }
         }
         Spacer(Modifier.height(d(16)))

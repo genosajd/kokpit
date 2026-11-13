@@ -1,6 +1,7 @@
 package pl.lawinski.radiolauncher
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.AcUnit
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.CalendarMonth
@@ -37,6 +38,7 @@ object Access {
         Group("home", "Dom (Tuya)", "Klimatyzator i czujnik w domu", Icons.Outlined.AcUnit, setOf("home_ac")),
         Group("calendar", "Kalendarz Google", "Odczyt i dodawanie terminów", Icons.Outlined.CalendarMonth, setOf("calendar")),
         Group("slack", "Slack", "Czytanie i wysyłanie wiadomości w Twoim imieniu (z potwierdzeniem)", Icons.Outlined.Chat, setOf("slack")),
+        Group("notes", "Notes", "Zapamiętywanie rzeczy na Twoją prośbę – między rozmowami", Icons.Outlined.EditNote, setOf("notes")),
         Group("web", "Internet", "Wyszukiwanie w sieci (tylko Claude)", Icons.Outlined.Language, setOf(WEB)),
     )
 

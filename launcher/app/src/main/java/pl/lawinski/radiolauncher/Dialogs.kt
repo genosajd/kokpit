@@ -2,6 +2,7 @@
 
 package pl.lawinski.radiolauncher
 
+import androidx.compose.material.icons.outlined.StickyNote2
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -200,6 +201,7 @@ fun SettingsDialog(
     onVoices: () -> Unit,
     onCustom: (CustomField) -> Unit,
     onInstructions: () -> Unit,
+    onNotes: () -> Unit,
     onDemo: (Boolean) -> Unit,
     onResetShortcuts: () -> Unit,
 ) {
@@ -279,7 +281,7 @@ fun SettingsDialog(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("Kokpit F11 0.3.24", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
+                Text("Kokpit F11 0.3.25", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
             }
             Spacer(Modifier.width(d(26)))
             LazyVerticalGrid(
@@ -530,12 +532,17 @@ fun SettingsDialog(
                 }
                 item {
                     SettingTile(Icons.Outlined.DataUsage, "Limit rozmowy: ${tokensText(tokenLimit.toLong())} tokenów",
-                        "Rozmowa zostaje po restarcie radia; po przekroczeniu limitu zaczyna się nowa. Teraz: ${tokensText(Assistant.tokens.value)}. Dotknij, aby zmienić") {
+                        "Po przekroczeniu limitu zaczyna się nowa rozmowa, a stara zostaje na liście do odczytu. Teraz: ${tokensText(Assistant.tokens.value)}. Dotknij, aby zmienić") {
                         val all = listOf(50_000, 100_000, 200_000, 500_000, 800_000)
                         tokenLimit = all[(all.indexOf(tokenLimit) + 1) % all.size]; Prefs.aiTokenLimit = tokenLimit
                     }
                 }
-                item { SettingTile(Icons.Outlined.RestartAlt, "Nowa rozmowa", "Asystent zapomni dotychczasową rozmowę") { Assistant.reset() } }
+                item { SettingTile(Icons.Outlined.RestartAlt, "Nowa rozmowa", "Dotychczasowa zostaje na liście rozmów (duże okno asystenta)") { Assistant.reset() } }
+                item {
+                    val n = Notes.items.size
+                    SettingTile(Icons.Outlined.StickyNote2, "Notes asystenta: " + if (n == 0) "pusty" else "$n",
+                        if (n == 0) "Powiedz „zapamiętaj, że…” – asystent zapisze to i będzie pamiętał w każdej rozmowie" else Notes.items.last().text.take(80)) { onNotes() }
+                }
                     }
                     // ---- Głos: czytanie odpowiedzi, wybór głosu, ElevenLabs
                     1 -> {
@@ -1032,6 +1039,42 @@ fun VoicePickerDialog(act: MainActivity, onClose: () -> Unit) {
                             }
                             libBusy = false
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Notes asystenta: podgląd tego, co zapamiętał, usuwanie pojedynczych zapisków albo wszystkich. */
+@Composable
+fun NotesDialog(onClose: () -> Unit) {
+    val items = Notes.items
+    var confirm by remember { mutableStateOf(false) }
+    Sheet("Notes asystenta", onClose) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(d(14))) {
+            Text(
+                if (items.isEmpty()) "Notes jest pusty. Powiedz asystentowi „zapamiętaj, że…”, a zapisze to tutaj i będzie pamiętał w każdej rozmowie."
+                else "Asystent ma te zapiski w każdej rozmowie. Dotknij kosza, żeby usunąć jeden.",
+                color = Dim, fontSize = s(20), modifier = Modifier.weight(1f),
+            )
+            if (items.isNotEmpty()) Box(Modifier.height(d(64)).kokpitSurface(d(16)).combinedClickable(onClick = {
+                if (confirm) { Notes.clear(); confirm = false } else confirm = true
+            }).padding(horizontal = d(20)), contentAlignment = Alignment.Center) {
+                Text(if (confirm) "Na pewno usunąć wszystko?" else "Wyczyść notes", color = if (confirm) Accent else Txt, fontSize = s(20))
+            }
+        }
+        Spacer(Modifier.height(d(16)))
+        androidx.compose.foundation.lazy.LazyColumn(verticalArrangement = Arrangement.spacedBy(d(10)), modifier = Modifier.fillMaxSize()) {
+            items(items.size) { i ->
+                val n = items[i]
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(d(10))) {
+                    Column(Modifier.weight(1f).kokpitSurface(d(16)).padding(horizontal = d(18), vertical = d(12))) {
+                        Text("${i + 1}. ${n.text}", color = Txt, fontSize = s(22))
+                        Text(java.text.SimpleDateFormat("d.MM.yyyy HH:mm", java.util.Locale("pl", "PL")).format(java.util.Date(n.time)), color = Dim, fontSize = s(16))
+                    }
+                    Box(Modifier.size(d(64)).kokpitSurface(d(16)).combinedClickable(onClick = { Notes.removeAt(i); confirm = false }), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Outlined.Delete, "Usuń zapisek", tint = Txt, modifier = Modifier.size(d(32)))
                     }
                 }
             }

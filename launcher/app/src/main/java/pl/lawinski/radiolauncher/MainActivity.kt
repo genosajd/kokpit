@@ -212,6 +212,12 @@ class MainActivity : ComponentActivity() {
     private val testHook = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             intent.getStringExtra("ask")?.takeIf { it.isNotBlank() }?.let { Assistant.send(this@MainActivity, it) }
+            intent.getStringExtra("youtube")?.let { q ->
+                Thread {
+                    val out = try { Assistant.testTool(this@MainActivity, "play_youtube", org.json.JSONObject().put("query", q)) } catch (e: Exception) { "błąd: $e" }
+                    out.lines().forEach { android.util.Log.i("KokpitTest", it) }
+                }.start()
+            }
             intent.getStringExtra("media")?.let { json ->
                 Thread {
                     val out = try { Assistant.testTool(this@MainActivity, "media_control", org.json.JSONObject(json)) } catch (e: Exception) { "błąd: $e" }
@@ -230,6 +236,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Prefs.init(this)
+        Notes.init()
         Assistant.init(this)
         live = this
         widgetManager = AppWidgetManager.getInstance(this)

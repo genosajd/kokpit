@@ -43,7 +43,7 @@ object Backup {
 
     /** stan tego jednego radia, bez sensu w innym: numery widżetów Androida, stan chwilowy */
     private fun local(key: String) = key == "camera_widget" || key.startsWith("block_widget") ||
-        key == "nav_popups_hidden" || key == "settings_group" || key == "settings_ai_tab" || key == "eleven_paused_until" || key == "car_model"
+        key == "nav_popups_hidden" || key == "settings_group" || key == "settings_ai_tab" || key == "eleven_paused_until" || key == "ai_session" || key == "car_model"
 
     fun export(withSecrets: Boolean, version: String): String {
         val prefs = JSONObject()
@@ -112,6 +112,7 @@ object Backup {
         runCatching { act.widgetHost.deleteHost() }
         Prefs.store.edit().clear().commit()
         runCatching { java.io.File(act.filesDir, "assistant_chat.json").delete() }
+        runCatching { java.io.File(act.filesDir, "assistant_chats").deleteRecursively() }
         runCatching { java.io.File(act.filesDir, "assistant_chat.json.tmp").delete() }
         runCatching { act.cacheDir.listFiles()?.forEach { it.deleteRecursively() } }
         restart(act)
