@@ -26,12 +26,14 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Dialpad
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Minimize
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
@@ -148,9 +150,11 @@ fun ContactAvatar(name: String, photo: String?, size: Dp, modifier: Modifier = M
 @Composable
 private fun CallBtn(modifier: Modifier, desc: String, text: String? = null, red: Boolean = false, enabled: Boolean = true, big: Boolean = false, onClick: () -> Unit) {
     val shape = LocalTheme.current.shape(d(12))
+    // zielona słuchawka działa tylko przy telefonie połączonym z Bluetoothem radia
+    val on = enabled && (red || Phone.connected.value)
     Row(
-        modifier.clip(shape).background(if (!enabled) Off else if (red) Red else Green)
-            .kokpitSurface(d(12), fill = false).combinedClickable(onClick = { if (enabled) onClick() }),
+        modifier.clip(shape).background(if (!on) Off else if (red) Red else Green)
+            .kokpitSurface(d(12), fill = false).combinedClickable(onClick = { if (on) onClick() }),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center,
     ) {
         Icon(if (red) Icons.Filled.CallEnd else Icons.Filled.Call, desc, tint = Color.White, modifier = Modifier.size(d(if (big) 38 else 30)))
@@ -304,6 +308,23 @@ fun PhoneBlock(modifier: Modifier, slot: Slot, act: MainActivity, onSearch: () -
                 }
             }
             Spacer(Modifier.height(d(12)))
+            if (!connected && !call.active) {
+                Row(
+                    Modifier.fillMaxWidth().pane().border(1.dp, Missed.copy(alpha = 0.6f), LocalTheme.current.shape(d(13))).padding(horizontal = d(14), vertical = d(10)),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.BluetoothDisabled, null, tint = Missed, modifier = Modifier.size(d(30)))
+                    Spacer(Modifier.width(d(12)))
+                    Column {
+                        Text("Telefon niepołączony", color = Missed, fontSize = s(20), fontWeight = FontWeight.Medium, maxLines = 1)
+                        Text(
+                            if (wide) "Połącz telefon z Bluetoothem radia, żeby dzwonić" else "Połącz go z Bluetoothem radia",
+                            color = Dim, fontSize = s(16), maxLines = 2,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(d(10)))
+            }
             when {
                 call.active -> CallCompact(act, call, wide, tall)
                 wide && tall -> {
@@ -389,13 +410,15 @@ private fun NoFavs(act: MainActivity, onOpen: () -> Unit) {
 }
 
 /** Rozmowa w bloku. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun CallCompact(ctx: Context, call: Phone.Call, wide: Boolean, tall: Boolean) {
     val hit = Phone.find(call.number)
     val name = call.name.ifBlank { pretty(call.number).ifBlank { "Nieznany numer" } }
     val now = rememberNow(call)
     Column(Modifier.fillMaxSize()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // dotknięcie rozmowy w bloku otwiera pełne okno rozmowy (powrót po zwinięciu)
+        Row(Modifier.fillMaxWidth().combinedClickable(onClick = { Phone.restore(ctx) }), verticalAlignment = Alignment.CenterVertically) {
             ContactAvatar(name, hit?.first?.photo, d(if (wide) 124 else 82))
             Spacer(Modifier.width(d(if (wide) 22 else 14)))
             Column(Modifier.weight(1f)) {
@@ -470,7 +493,7 @@ private fun InfoRow(k: String, v: String, vColor: Color = Txt) {
 
 /** Pełne okno rozmowy (CallActivity i okno telefonu): więcej szczegółów niż w bloku. */
 @Composable
-fun CallWindow(ctx: Context, call: Phone.Call) {
+fun CallWindow(ctx: Context, call: Phone.Call, onMinimize: (() -> Unit)? = null) {
     val hit = Phone.find(call.number)
     val name = call.name.ifBlank { pretty(call.number).ifBlank { "Nieznany numer" } }
     val phone by Phone.phoneName
@@ -533,7 +556,11 @@ fun CallWindow(ctx: Context, call: Phone.Call) {
                 Text("od " + java.text.SimpleDateFormat("H:mm", java.util.Locale("pl")).format(java.util.Date(call.since)), color = Dim, fontSize = s(22), modifier = Modifier.padding(bottom = d(22)))
             } else Text("Dzwonię…", color = Dim, fontSize = s(54), modifier = Modifier.padding(vertical = d(24)))
             Spacer(Modifier.height(d(14)))
-            CallBtn(Modifier.fillMaxWidth().height(d(96)), "Rozłącz", "Rozłącz", red = true, big = true) { Phone.hangup(ctx) }
+            Row(horizontalArrangement = Arrangement.spacedBy(d(16))) {
+                CallBtn(Modifier.weight(1f).height(d(96)), "Rozłącz", "Rozłącz", red = true, big = true) { Phone.hangup(ctx) }
+                // zwinięcie okna: rozmowa trwa, wraca się z paska u góry ekranu albo z bloku Telefon
+                if (onMinimize != null) PlainBtn(Modifier.width(d(230)).height(d(96)), Icons.Filled.Minimize, "Zwiń", onClick = onMinimize)
+            }
         }
         Column(Modifier.width(d(560))) {
             Text("GŁOŚNOŚĆ", color = Dim, fontSize = s(16), fontWeight = FontWeight.Bold, letterSpacing = s(2.5))
@@ -626,7 +653,7 @@ fun PhoneDialog(act: MainActivity, search: Boolean, onClose: () -> Unit) {
             }
             Spacer(Modifier.height(d(12)))
             if (call.active) {
-                CallWindow(act, call)
+                CallWindow(act, call, onMinimize = { Phone.minimize(act); onClose() })
                 return@Column
             }
             Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(d(18))) {

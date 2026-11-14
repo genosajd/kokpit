@@ -155,7 +155,7 @@ object Phone {
                 call.value = Call(state, number, name, since, inbound, answered)
                 when {
                     // przychodzące: okno zawsze (nawet gdy Kokpit na wierzchu, żeby nie przegapić)
-                    state == INCOMING && prev.state != INCOMING -> CallActivity.open(ctx)
+                    state == INCOMING && prev.state != INCOMING -> { minimized.value = false; CallPill.hide(); CallActivity.open(ctx) }
                     // wychodzące: okno tylko, gdy Kokpit nie jest na ekranie (inaczej widać blok / okno telefonu)
                     state == OUTGOING && prev.state != OUTGOING -> showWindow(ctx)
                 }
@@ -167,9 +167,30 @@ object Phone {
                     record(ctx, prev.number, prev.name, type, seconds)
                 }
                 call.value = Call(IDLE, "", "", 0L)
+                minimized.value = false
+                CallPill.hide()
                 CallActivity.closeIfOpen()
             }
         }
+    }
+
+    // --- zwinięte okno rozmowy ---
+
+    /** okno rozmowy zwinięte do paska u góry ekranu (rozmowa trwa) */
+    val minimized = mutableStateOf(false)
+
+    fun minimize(ctx: Context) {
+        if (!call.value.active) return
+        minimized.value = true
+        CallActivity.closeIfOpen()
+        CallPill.show(ctx)
+    }
+
+    /** Powrót do pełnego okna rozmowy. */
+    fun restore(ctx: Context) {
+        minimized.value = false
+        CallPill.hide()
+        if (call.value.active) CallActivity.open(ctx)
     }
 
     private fun showWindow(ctx: Context) {
