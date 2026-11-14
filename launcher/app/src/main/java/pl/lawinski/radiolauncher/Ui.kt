@@ -44,6 +44,7 @@ import androidx.compose.material.icons.outlined.AcUnit
 import androidx.compose.material.icons.outlined.DirectionsCar
 import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.MusicNote
+import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.WaterDrop
 import androidx.compose.material.icons.outlined.Air
@@ -187,6 +188,8 @@ sealed interface Dlg {
     data object Instructions : Dlg
     data object Notes : Dlg
     data object Cameras : Dlg
+    /** okno telefonu; search = od razu wyszukiwarka kontaktów */
+    data class Phone(val search: Boolean = false) : Dlg
     /** wybór widżetu do klocka „Widżet” nr n */
     data class Widgets(val n: Int) : Dlg
     /** wybór urządzenia do klocka „Urządzenie Tuya” nr n */
@@ -207,6 +210,9 @@ fun LauncherScreen(act: MainActivity) {
     LaunchedEffect(act.homePressed.intValue) {
         dialog = null
         edit = false
+    }
+    LaunchedEffect(act.showPhone.intValue) {
+        if (act.showPhone.intValue > 0) dialog = Dlg.Phone()
     }
     // pokaz danych auta: paliwo i kolejno otwierane drzwi; po wyłączeniu wracają dane z CAN
     LaunchedEffect(demo) {
@@ -308,6 +314,7 @@ fun LauncherScreen(act: MainActivity) {
                                 BlockId.TUYA -> TuyaDeviceBlock(m, slot, act, onChoose = { dialog = Dlg.TuyaDevices(slot.n) }, onSettings = { Prefs.settingsGroup = 8; dialog = Dlg.Settings })
                                 BlockId.ASSISTANT -> AssistantBlock(m, slot, act, onSettings = { Prefs.settingsGroup = 7; dialog = Dlg.Settings })
                                 BlockId.WIDGET -> WidgetBlock(m, act, slot.n, onChoose = { dialog = Dlg.Widgets(slot.n) })
+                                BlockId.PHONE -> PhoneBlock(m, slot, act, onSearch = { dialog = Dlg.Phone(true) }, onOpen = { dialog = Dlg.Phone() })
                             }
                         }
                     }
@@ -353,6 +360,7 @@ fun LauncherScreen(act: MainActivity) {
                     is Dlg.Instructions -> InstructionsDialog(onClose = { dialog = Dlg.Settings })
                     is Dlg.Notes -> NotesDialog(onClose = { dialog = Dlg.Settings })
                     is Dlg.Cameras -> CameraPickerDialog(act, onClose = { dialog = null })
+                    is Dlg.Phone -> PhoneDialog(act, dl.search, onClose = { dialog = null })
                     is Dlg.TuyaDevices -> TuyaDevicePickerDialog(act, dl.n, onClose = { dialog = null })
                     is Dlg.Widgets -> WidgetPickerDialog(act, onClose = { dialog = null }) { provider ->
                         dialog = null
@@ -590,6 +598,7 @@ private fun blockInfo(id: BlockId) = when (id) {
     BlockId.CLIMATE -> BlockInfo(Icons.Outlined.AcUnit, "20,6° w domu", "Klimatyzator w domu (Smart Life)")
     BlockId.TUYA -> BlockInfo(Icons.Outlined.Lightbulb, "Światło · czujnik", "Urządzenie Smart Life – można dodać kilka")
     BlockId.MEDIA -> BlockInfo(Icons.Outlined.MusicNote, "Tytuł · wykonawca", "Steruje tym, co gra: YouTube, SoundCloud i inne")
+    BlockId.PHONE -> BlockInfo(Icons.Outlined.Phone, "Klawiatura · kontakty", "Dzwonienie przez Bluetooth radia")
 }
 
 /** Okno „Widżety” w edycji układu: siatka klocków z podglądem i nazwą; dotknięcie dodaje klocek do ekranu. */
@@ -1480,19 +1489,42 @@ fun AssistantBlock(modifier: Modifier, slot: Slot, act: MainActivity, onSettings
 
 /** Wiadomości rozmowy: dotknięcie kopiuje treść do schowka, przytrzymanie odpowiedzi czyta ją na głos. */
 @Composable
-private fun ChatLines(act: MainActivity, list: androidx.compose.foundation.lazy.LazyListState, busy: Boolean, bubble: Float, lines: List<ChatLine> = Assistant.lines) {
+private fun ChatLines(
+    act: MainActivity, list: androidx.compose.foundation.lazy.LazyListState, busy: Boolean, bubble: Float,
+    lines: List<ChatLine> = Assistant.lines, onDelete: ((Int) -> Unit)? = null,
+) {
+    // usuwanie wiadomości: pierwsze dotknięcie kosza prosi o potwierdzenie, drugie usuwa
+    var confirm by remember { mutableStateOf(-1) }
+    LaunchedEffect(lines.size) { confirm = -1 }
     androidx.compose.foundation.lazy.LazyColumn(state = list, verticalArrangement = Arrangement.spacedBy(d(10)), modifier = Modifier.fillMaxSize()) {
         items(lines.size) { i ->
             val l = lines[i]
             val shown = if (l.fromUser) l.text else Speech.plain(l.text)
+            val trash: @Composable () -> Unit = {
+                if (onDelete != null && !busy) Box(
+                    Modifier.padding(horizontal = d(8)).size(d(54)).kokpitSurface(d(12), active = confirm == i)
+                        .combinedClickable(onClick = { if (confirm == i) { confirm = -1; onDelete(i) } else confirm = i }),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Outlined.Delete, if (confirm == i) "Potwierdź usunięcie wiadomości" else "Usuń wiadomość",
+                        tint = if (confirm == i) LocalTheme.current.activeText else Dim, modifier = Modifier.size(d(28)))
+                }
+            }
             Box(Modifier.fillMaxWidth(), contentAlignment = if (l.fromUser) Alignment.CenterEnd else Alignment.CenterStart) {
-                Text(
-                    shown, color = if (l.fromUser) LocalTheme.current.activeText else Txt, fontSize = s(22), lineHeight = s(30),
-                    modifier = Modifier.fillMaxWidth(bubble).wrapContentWidth(if (l.fromUser) Alignment.End else Alignment.Start)
-                        .then(if (l.fromUser) Modifier.kokpitSurface(d(16), active = true) else Modifier.kokpitSurface(d(16)))
-                        .combinedClickable(onClick = { copyText(act, shown) }, onLongClick = { if (!l.fromUser) act.speak(l.text) })
-                        .padding(horizontal = d(16), vertical = d(10)),
-                )
+                Row(
+                    Modifier.fillMaxWidth(bubble), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = if (l.fromUser) Arrangement.End else Arrangement.Start,
+                ) {
+                    if (l.fromUser) trash()
+                    Text(
+                        shown, color = if (l.fromUser) LocalTheme.current.activeText else Txt, fontSize = s(22), lineHeight = s(30),
+                        modifier = Modifier.weight(1f, fill = false)
+                            .then(if (l.fromUser) Modifier.kokpitSurface(d(16), active = true) else Modifier.kokpitSurface(d(16)))
+                            .combinedClickable(onClick = { copyText(act, shown) }, onLongClick = { if (!l.fromUser) act.speak(l.text) })
+                            .padding(horizontal = d(16), vertical = d(10)),
+                    )
+                    if (!l.fromUser) trash()
+                }
             }
         }
         if (busy) item { Text("Myślę…", color = Dim, fontSize = s(20), modifier = Modifier.padding(start = d(8))) }
@@ -1604,7 +1636,7 @@ fun ChatDialog(act: MainActivity, onSettings: () -> Unit, onClose: () -> Unit) {
         }
         Spacer(Modifier.height(d(16)))
         if (lines.isEmpty() && !busy) Text(if (Assistant.hasKey()) "Zapytaj o cokolwiek albo poproś o trasę" else "Wpisz klucz API: Ustawienia → Asystent AI", color = Dim, fontSize = s(22))
-        else ChatLines(act, list, busy, 0.8f)
+        else ChatLines(act, list, busy, 0.8f, onDelete = { Assistant.deleteLine(act, it) })
     }
 }
 

@@ -52,6 +52,17 @@ class MainActivity : ComponentActivity() {
     /** Launcher na ekranie: tylko wtedy działa podgląd kamery na żywo i model 3D. */
     val visible = mutableStateOf(false)
 
+    /** Prośba o otwarcie okna Telefon (przycisk telefonu w trybie „Telefon Kokpit”). */
+    val showPhone = mutableIntStateOf(0)
+
+    /** Otwiera ekran główny i okno Telefon (klawiatura). */
+    fun requestPhone() {
+        startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        // otwarte przyciskiem z kierownicy: pierwszy ulubiony od razu zaznaczony (drugie naciśnięcie dzwoni)
+        Phone.favIndex.intValue = if (Phone.favourites().isEmpty()) -1 else 0
+        showPhone.intValue++
+    }
+
     private var pendingWidgetId = -1
     /** numer klocka „Widżet”, do którego trafi dodawany widżet; -1 = klocek kamery */
     private var pendingBlock = -1
@@ -212,6 +223,12 @@ class MainActivity : ComponentActivity() {
     private val testHook = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             intent.getStringExtra("ask")?.takeIf { it.isNotBlank() }?.let { Assistant.send(this@MainActivity, it) }
+            // telefon bez kierownicy: --es phone key (przycisk telefonu) | next | prev (następny / poprzedni)
+            when (intent.getStringExtra("phone")) {
+                "key" -> if (!Phone.phoneKeyInCall(this@MainActivity) && !Phone.phoneKeyInWindow(this@MainActivity)) requestPhone()
+                "next" -> Phone.wheel(1)
+                "prev" -> Phone.wheel(-1)
+            }
             intent.getStringExtra("youtube")?.let { q ->
                 Thread {
                     val out = try { Assistant.testTool(this@MainActivity, "play_youtube", org.json.JSONObject().put("query", q)) } catch (e: Exception) { "błąd: $e" }
@@ -270,6 +287,7 @@ class MainActivity : ComponentActivity() {
         }, ContextCompat.RECEIVER_NOT_EXPORTED)
         ContextCompat.registerReceiver(this, testHook, IntentFilter("pl.lawinski.radiolauncher.TEST"),
             Manifest.permission.DUMP, null, ContextCompat.RECEIVER_EXPORTED)
+        Phone.install(this)
 
         setContent { LauncherScreen(this) }
         handleVoiceIntent(intent)

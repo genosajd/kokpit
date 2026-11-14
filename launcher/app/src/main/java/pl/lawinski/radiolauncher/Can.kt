@@ -104,14 +104,39 @@ object CanSource {
      */
     private fun isPhoneKey(b: ByteArray) = b.size >= 4 && b[0].toInt() == 0x02 && b[1].toInt() == 0x22 && b[2].toInt() == 0x12 && b[3].toInt() == 0x00
 
+    /**
+     * Następny / poprzedni z kierownicy: ramki `02 22 03 01` (doKey 3 = następny) i `02 22 02 01`
+     * (doKey 4 = poprzedni), bez ramki puszczenia. Przy otwartym oknie telefonu przełączają ulubionego
+     * (radio i tak przekaże je też odtwarzaczowi). Który to fizycznie przycisk – do potwierdzenia w aucie.
+     */
+    private fun wheelKey(b: ByteArray): Int? {
+        if (b.size < 4 || b[0].toInt() != 0x02 || b[1].toInt() != 0x22 || b[3].toInt() != 0x01) return null
+        return when (b[2].toInt()) { 0x03 -> 1; 0x02 -> -1; else -> null }
+    }
+
     private var lastPhoneKey = 0L
 
     private fun phoneKey(ctx: Context) {
         val now = System.currentTimeMillis()
         if (now - lastPhoneKey < 3000) return
         lastPhoneKey = now
-        Log.i("CanSource", "telefon BMW – ekran iDrive")
-        if (Prefs.phoneToIdrive) openCarScreen(ctx)
+        // trwa połączenie przez radio: przycisk odbiera albo kończy rozmowę (w obu trybach)
+        if (Phone.phoneKeyInCall(ctx)) return
+        when (Prefs.phoneButton) {
+            "kokpit" -> {
+                Log.i("CanSource", "przycisk telefonu – okno Telefon Kokpit")
+                // okno już otwarte: przycisk zaznacza ulubionego, a następnym naciśnięciem dzwoni
+                if (Phone.phoneKeyInWindow(ctx)) return
+                val main = MainActivity.live
+                if (main != null) main.requestPhone()
+                else ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
+                    ?.let { ctx.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            }
+            else -> {
+                Log.i("CanSource", "telefon BMW – ekran iDrive")
+                openCarScreen(ctx)
+            }
+        }
     }
 
     /**
@@ -204,6 +229,7 @@ object CanSource {
                         // przycisk telefonu z BMW (rozmowa) – tylko świeże ramki, nie zaległe z logu
                         val at = line.trim().substringBefore(' ').toDoubleOrNull()?.times(1000)?.toLong() ?: 0L
                         if (isPhoneKey(bytes) && at >= since - 2000) main.post { phoneKey(ctx) }
+                        if (at >= since - 2000) wheelKey(bytes)?.let { delta -> main.post { Phone.wheel(delta) } }
                         if (at >= since - 2000) tiltKey(bytes)?.let { code -> main.post { tilt(code) } }
                     }
                     p.waitFor()

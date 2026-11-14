@@ -132,7 +132,13 @@ fun SystemIcons() {
             delay(5000)
         }
     }
+    val phoneOn by Phone.connected
     Row(verticalAlignment = Alignment.CenterVertically) {
+        // telefon połączony z Bluetoothem radia (dzwonienie przez radio)
+        if (phoneOn) {
+            StatIcon(Icons.Rounded.Bluetooth)
+            Spacer(Modifier.width(d(16)))
+        }
         st.cellLevel?.let { lvl ->
             if (st.cellType.isNotEmpty()) {
                 Text(st.cellType, color = Dim, fontSize = s(18), fontWeight = FontWeight.Medium)

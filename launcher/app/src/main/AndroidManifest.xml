@@ -18,6 +18,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.WRITE_CONTACTS" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
@@ -104,6 +106,17 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <!-- okno rozmowy nad dowolną aplikacją (przychodzące/wychodzące przez BT radia) -->
+        <activity
+            android:name=".CallActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RadioLauncher.Voice"
+            android:taskAffinity="pl.lawinski.radiolauncher.call"
+            android:launchMode="singleTask"
+            android:excludeFromRecents="true"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|navigation|uiMode|density" />
 
         <!-- podgląd trasy z powiadomień Map Google / Waze -->
         <service

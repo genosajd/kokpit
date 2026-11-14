@@ -10,6 +10,7 @@ import androidx.compose.material.icons.outlined.DirectionsCar
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.Navigation
+import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material.icons.outlined.Radio
 import androidx.compose.material.icons.outlined.Videocam
@@ -36,6 +37,7 @@ object Access {
         Group("radio", "Radio", "Głośność, jasność, ekran iDrive, wygląd", Icons.Outlined.Radio, setOf("radio_control")),
         Group("camera", "Kamery", "Zdjęcia z kamer Xiaomi, obrót, zoom", Icons.Outlined.Videocam, setOf("camera_snapshot", "camera_control")),
         Group("home", "Dom (Tuya)", "Klimatyzator i czujnik w domu", Icons.Outlined.AcUnit, setOf("home_ac")),
+        Group("phone", "Telefon", "Dzwonienie, odbieranie i rozłączanie przez BT radia", Icons.Outlined.Phone, setOf("phone")),
         Group("calendar", "Kalendarz Google", "Odczyt i dodawanie terminów", Icons.Outlined.CalendarMonth, setOf("calendar")),
         Group("slack", "Slack", "Czytanie i wysyłanie wiadomości w Twoim imieniu (z potwierdzeniem)", Icons.Outlined.Chat, setOf("slack")),
         Group("notes", "Notes", "Zapamiętywanie rzeczy na Twoją prośbę – między rozmowami", Icons.Outlined.EditNote, setOf("notes")),

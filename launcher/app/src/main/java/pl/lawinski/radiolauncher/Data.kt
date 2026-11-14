@@ -160,6 +160,14 @@ object Prefs {
         get() = sp.getBoolean("phone_to_idrive", true)
         set(v) = sp.edit().putBoolean("phone_to_idrive", v).apply()
 
+    /**
+     * Co robi przycisk telefonu (z kierownicy / iDrive, ramka CAN):
+     * "idrive" = ekran BMW (rozmowy w BMW), "kokpit" = okno Telefon w Kokpicie (rozmowy przez BT radia; domyślne od 2026-11-14).
+     */
+    var phoneButton: String
+        get() = sp.getString("phone_button", "kokpit")!!
+        set(v) = sp.edit().putString("phone_button", v).apply()
+
     /** dostępy asystenta wyłączone przez właściciela (id grup z Access.groups) */
     var aiDisabled: Set<String>
         get() = sp.getStringSet("ai_disabled", emptySet())?.toSet() ?: emptySet()

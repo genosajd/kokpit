@@ -140,6 +140,15 @@ private object AssistantTools {
             listOf("action", "value"),
         ),
         Def(
+            "phone",
+            "Telefon przez Bluetooth radia. call = zadzwoń pod numer albo do kontaktu (pole number: numer telefonu albo imię z kontaktów, np. „Marek”). answer = odbierz połączenie przychodzące. hangup = rozłącz bieżącą rozmowę. status = stan telefonu i rozmowy. Dzwonienie działa tylko, gdy telefon jest połączony z Bluetoothem radia.",
+            mapOf(
+                "action" to mapOf("type" to "string", "enum" to listOf("call", "answer", "hangup", "status")),
+                "number" to mapOf("type" to "string", "description" to "call: numer telefonu albo imię kontaktu; inaczej pusty"),
+            ),
+            listOf("action", "number"),
+        ),
+        Def(
             "calendar",
             "Kalendarz Google właściciela (zsynchronizowany w radiu). list = terminy od dnia date (RRRR-MM-DD, pusty = dziś) przez days dni; zwraca też dzisiejszą datę i godzinę. add = nowy termin: title, date = początek „RRRR-MM-DD GG:MM” (sama data = cały dzień), minutes = czas trwania, location = miejsce (może być puste). Przed add, gdy nie znasz dzisiejszej daty (np. „jutro”), najpierw wywołaj list. Gdy termin ma miejsce, a ktoś chce tam jechać, użyj navigate.",
             mapOf(
@@ -248,6 +257,7 @@ private object AssistantTools {
         "media_control" -> mediaControl(act, input.optString("action"), input.optString("app").trim(), input.optLong("seconds"), input.optString("query").trim())
         "camera_control" -> cameraControl(act, input)
         "calendar" -> calendar(act, input)
+        "phone" -> Phone.run(act, input)
         "slack" -> Slack.run(input)
         "notes" -> Notes.run(input)
         "home_ac" -> homeAc(input.optString("action"), input.optDouble("value", 0.0))
@@ -1043,6 +1053,23 @@ object Assistant {
         engine = e
         engineKey = id
         return e
+    }
+
+    /**
+     * Usuwa jedną wiadomość z bieżącej rozmowy – z ekranu, z pliku i z pamięci asystenta
+     * (asystent dostaje od tej chwili samą treść pozostałych wiadomości).
+     */
+    fun deleteLine(act: MainActivity, index: Int) {
+        if (busy.value || index !in lines.indices) return
+        lines.removeAt(index)
+        val rest = lines.toList()
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                val e = engine(act)
+                e.loadText(rest, e.tokens)
+                save(e)
+            }
+        }
     }
 
     private fun save(e: ChatEngine) {

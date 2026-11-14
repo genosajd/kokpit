@@ -281,7 +281,7 @@ fun SettingsDialog(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("Kokpit F11 0.3.25", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
+                Text("Kokpit F11 0.3.26", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
             }
             Spacer(Modifier.width(d(26)))
             LazyVerticalGrid(
@@ -422,9 +422,15 @@ fun SettingsDialog(
                     }
                 }
                 item {
-                    var on by remember { mutableStateOf(Prefs.phoneToIdrive) }
-                    SettingTile(Icons.Outlined.Phone, "Rozmowa → ekran iDrive", if (on) "Przy rozmowie z telefonu w BMW otwiera ekran iDrive" else "Wyłączone", on = on) {
-                        on = !on; Prefs.phoneToIdrive = on
+                    var mode by remember { mutableStateOf(Prefs.phoneButton) }
+                    val kokpit = mode == "kokpit"
+                    SettingTile(
+                        Icons.Outlined.Phone, "Przycisk telefonu",
+                        if (kokpit) "Otwiera Telefon Kokpit (rozmowy przez Bluetooth radia)"
+                        else "Otwiera ekran iDrive (rozmowy w BMW)",
+                        on = kokpit,
+                    ) {
+                        mode = if (kokpit) "idrive" else "kokpit"; Prefs.phoneButton = mode
                     }
                 }
                 item {
