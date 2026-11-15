@@ -2,6 +2,7 @@
 
 package pl.lawinski.radiolauncher
 
+import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.StickyNote2
 import android.content.Intent
 import android.provider.Settings
@@ -281,7 +282,7 @@ fun SettingsDialog(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("Kokpit F11 0.3.28", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
+                Text("Kokpit F11 0.3.29", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
             }
             Spacer(Modifier.width(d(26)))
             LazyVerticalGrid(
@@ -315,6 +316,11 @@ fun SettingsDialog(
                         }
                     }
                 }
+                item {
+                    val own = CarPhoto.image.value != null
+                    SettingTile(Icons.Outlined.DirectionsCar, "Zdjęcie auta", if (own) "Własne – dotknij, aby wybrać inne" else "Wbudowane – dotknij, aby wgrać własne (najlepiej PNG bez tła)") { act.pickCarPhoto() }
+                }
+                if (CarPhoto.image.value != null) item { SettingTile(Icons.Outlined.RestartAlt, "Wbudowane zdjęcie auta", "Usuwa własne zdjęcie") { CarPhoto.clear(act) } }
                 val c = ThemeCustoms.current()
                 item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                     Text("Dostosuj: ${themeState.value.name}", color = Txt, fontSize = s(24), fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = d(14)))
@@ -328,7 +334,12 @@ fun SettingsDialog(
                 if (!c.isDefault) item { SettingTile(Icons.Outlined.RestartAlt, "Przywróć wygląd", "Usuwa zmiany dla „${themeState.value.name}”") { ThemeCustoms.set(themeState.value.id, ThemeCustom()) } }
                     }
                     1 -> {
-                item { SettingTile(Icons.Outlined.Tune, "Ustawienia radia Witstek", "Dźwięk, system, nawigacja; fabryczne z PIN-em 8888") { openRadioSettings(act) } }
+                if (Radio.witstek) item { SettingTile(Icons.Outlined.Tune, "Ustawienia radia Witstek", "Dźwięk, system, nawigacja; fabryczne z PIN-em 8888") { openRadioSettings(act) } }
+                item {
+                    SettingTile(Icons.Outlined.Memory, "Rodzaj radia", Radio.describe()) {
+                        Prefs.radioMode = Radio.nextMode(); Backup.restart(act)
+                    }
+                }
                 item { SettingTile(Icons.Outlined.Settings, "Ustawienia Androida", "Wi-Fi, Bluetooth, aplikacje") { open(Settings.ACTION_SETTINGS) } }
                 item { SettingTile(Icons.Outlined.Home, "Ekran główny", "Wybierz „Kokpit F11” jako domyślny launcher") { open(Settings.ACTION_HOME_SETTINGS) } }
                 if (!locOn) item { SettingTile(Icons.Outlined.MyLocation, "Lokalizacja", "Potrzebna do prędkości i pogody", on = false) { act.requestLocation() } }
@@ -416,29 +427,31 @@ fun SettingsDialog(
                 if (act.cameraWidgetId.intValue != -1) item { SettingTile(Icons.Outlined.Delete, "Usuń widżet kamery", "Blok kamery wróci do wyboru") { act.removeCameraWidget() } }
                     }
                     6 -> {
-                item {
-                    SettingTile(Icons.Outlined.Warning, "Ostrzeżenie „Zapnij pasy”", if (beltOn.value) "Tylko w czasie jazdy; sygnał z CAN może obejmować puste fotele" else "Ostrzega zestaw wskaźników BMW", on = beltOn.value) {
-                        beltOn.value = !beltOn.value; Prefs.beltWarn = beltOn.value
+                if (Radio.witstek) {
+                    item {
+                        SettingTile(Icons.Outlined.Warning, "Ostrzeżenie „Zapnij pasy”", if (beltOn.value) "Tylko w czasie jazdy; sygnał z CAN może obejmować puste fotele" else "Ostrzega zestaw wskaźników BMW", on = beltOn.value) {
+                            beltOn.value = !beltOn.value; Prefs.beltWarn = beltOn.value
+                        }
                     }
-                }
-                item {
-                    var mode by remember { mutableStateOf(Prefs.phoneButton) }
-                    val kokpit = mode == "kokpit"
-                    SettingTile(
-                        Icons.Outlined.Phone, "Przycisk telefonu",
-                        if (kokpit) "Otwiera Telefon Kokpit (rozmowy przez Bluetooth radia)"
-                        else "Otwiera ekran iDrive (rozmowy w BMW)",
-                        on = kokpit,
-                    ) {
-                        mode = if (kokpit) "idrive" else "kokpit"; Prefs.phoneButton = mode
+                    item {
+                        var mode by remember { mutableStateOf(Prefs.phoneButton) }
+                        val kokpit = mode == "kokpit"
+                        SettingTile(
+                            Icons.Outlined.Phone, "Przycisk telefonu",
+                            if (kokpit) "Otwiera Telefon Kokpit (rozmowy przez Bluetooth radia)"
+                            else "Otwiera ekran iDrive (rozmowy w BMW)",
+                            on = kokpit,
+                        ) {
+                            mode = if (kokpit) "idrive" else "kokpit"; Prefs.phoneButton = mode
+                        }
                     }
-                }
-                item {
-                    var on by remember { mutableStateOf(Prefs.canLogs) }
-                    SettingTile(Icons.Outlined.DataUsage, "Dane auta z dzienników radia",
-                        if (on) "Paliwo, bieg, temperatura, telefon → iDrive. Android pyta o zgodę po starcie Kokpitu"
-                        else "Bez pytania o zgodę – zostają tylko drzwi i prędkość", on = on) {
-                        on = !on; Prefs.canLogs = on; CanSource.logsChanged()
+                    item {
+                        var on by remember { mutableStateOf(Prefs.canLogs) }
+                        SettingTile(Icons.Outlined.DataUsage, "Dane auta z dzienników radia",
+                            if (on) "Paliwo, bieg, temperatura, telefon → iDrive. Android pyta o zgodę po starcie Kokpitu"
+                            else "Bez pytania o zgodę – zostają tylko drzwi i prędkość", on = on) {
+                            on = !on; Prefs.canLogs = on; CanSource.logsChanged()
+                        }
                     }
                 }
                 item { SettingTile(Icons.Outlined.PlayCircle, "Pokaz danych auta", if (demo) "Paliwo i drzwi to dane przykładowe" else "Paliwo i drzwi z modułu CAN radia", on = demo) { onDemo(!demo) } }
@@ -694,7 +707,7 @@ fun SettingsDialog(
                     Text("Dostępy asystenta – dotknij, aby zablokować albo odblokować", color = Dim, fontSize = s(20),
                         modifier = Modifier.padding(top = d(14), bottom = d(4)))
                 }
-                Access.groups.forEach { g ->
+                Access.visible.forEach { g ->
                     item {
                         @Suppress("UNUSED_VARIABLE") val v = Access.version.value
                         val on = Access.enabled(g.id)

@@ -47,6 +47,11 @@ object Access {
     /** wersja do odświeżania kafelków w Ustawieniach */
     val version = mutableStateOf(0)
 
+    /** Czy to radio w ogóle ma taką funkcję (telefon – tylko Witstek); niedostępnych grup nie pokazujemy. */
+    fun available(groupId: String) = groupId != "phone" || Radio.witstek
+
+    val visible get() = groups.filter { available(it.id) }
+
     fun enabled(groupId: String) = groupId !in Prefs.aiDisabled
 
     fun set(groupId: String, on: Boolean) {
@@ -58,12 +63,12 @@ object Access {
     /** Czy asystent może użyć narzędzia [tool]. */
     fun allows(tool: String): Boolean {
         val g = groups.firstOrNull { tool in it.tools } ?: return true
-        return enabled(g.id)
+        return available(g.id) && enabled(g.id)
     }
 
     /** Dopisek do promptu: czego asystent nie może, żeby odpowiedział wprost zamiast próbować. */
     fun promptNote(): String {
-        val off = groups.filter { !enabled(it.id) }
+        val off = visible.filter { !enabled(it.id) }
         if (off.isEmpty()) return ""
         return "\n\nWłaściciel wyłączył Ci dostęp do: ${off.joinToString { it.title }}. Gdy ktoś o to prosi, powiedz krótko, że ten dostęp jest wyłączony w Ustawieniach Kokpitu → Asystent AI → Dostępy."
     }

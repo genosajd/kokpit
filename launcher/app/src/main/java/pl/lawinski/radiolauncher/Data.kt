@@ -168,6 +168,11 @@ object Prefs {
         get() = sp.getString("phone_button", "kokpit")!!
         set(v) = sp.edit().putString("phone_button", v).apply()
 
+    /** rodzaj radia: "" = wykrywany automatycznie, "witstek", "inne" (patrz Radio.kt) */
+    var radioMode: String
+        get() = sp.getString("radio_mode", "")!!
+        set(v) { sp.edit().putString("radio_mode", v).commit() }
+
     /** dostępy asystenta wyłączone przez właściciela (id grup z Access.groups) */
     var aiDisabled: Set<String>
         get() = sp.getStringSet("ai_disabled", emptySet())?.toSet() ?: emptySet()

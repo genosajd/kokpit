@@ -75,7 +75,7 @@ object Phone {
     private val main = Handler(Looper.getMainLooper())
 
     fun install(ctx: Context) {
-        if (installed) return
+        if (installed || !Radio.witstek) return // moduł telefonu jest tylko w radiu Witstek
         installed = true
         val app = ctx.applicationContext
         historyFile = File(app.filesDir, "call_history.json")

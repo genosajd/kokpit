@@ -316,9 +316,9 @@ fun PhoneBlock(modifier: Modifier, slot: Slot, act: MainActivity, onSearch: () -
                     Icon(Icons.Filled.BluetoothDisabled, null, tint = Missed, modifier = Modifier.size(d(30)))
                     Spacer(Modifier.width(d(12)))
                     Column {
-                        Text("Telefon niepołączony", color = Missed, fontSize = s(20), fontWeight = FontWeight.Medium, maxLines = 1)
+                        Text(if (Radio.witstek) "Telefon niepołączony" else "Telefon niedostępny", color = Missed, fontSize = s(20), fontWeight = FontWeight.Medium, maxLines = 1)
                         Text(
-                            if (wide) "Połącz telefon z Bluetoothem radia, żeby dzwonić" else "Połącz go z Bluetoothem radia",
+                            if (!Radio.witstek) "Działa tylko w radiu Witstek" else if (wide) "Połącz telefon z Bluetoothem radia, żeby dzwonić" else "Połącz go z Bluetoothem radia",
                             color = Dim, fontSize = s(16), maxLines = 2,
                         )
                     }
@@ -643,7 +643,7 @@ fun PhoneDialog(act: MainActivity, search: Boolean, onClose: () -> Unit) {
                 Box(Modifier.size(d(12)).background(if (connected) Color(0xFF35C467) else Missed))
                 Spacer(Modifier.width(d(10)))
                 Text(
-                    if (connected) phone.ifBlank { "Telefon" } + " · połączony przez Bluetooth radia" else "Telefon niepołączony z Bluetoothem radia",
+                    if (connected) phone.ifBlank { "Telefon" } + " · połączony przez Bluetooth radia" else if (Radio.witstek) "Telefon niepołączony z Bluetoothem radia" else "Telefon działa tylko w radiu Witstek",
                     color = if (connected) Dim else Missed, fontSize = s(19), maxLines = 1,
                 )
                 Spacer(Modifier.weight(1f))

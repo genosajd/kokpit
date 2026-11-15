@@ -60,7 +60,7 @@ fun RuleDialog(rule: Rule, isNew: Boolean, act: MainActivity, onClose: () -> Uni
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(d(10)),
                 verticalAlignment = Alignment.CenterVertically) {
                 Text("Jeśli", color = Dim, fontSize = s(22))
-                RuleSource.entries.forEach { src ->
+                RuleSource.entries.filter { Radio.witstek || it == r.source || (it != RuleSource.FUEL && it != RuleSource.BATTERY) }.forEach { src ->
                     Chip(src.title, on = r.source == src) {
                         // przy zmianie rodzaju źródła (liczba ↔ Slack) stara wartość nie pasuje
                         r = r.copy(source = src, value = if (src.slack != r.source.slack || src.camera != r.source.camera) "" else r.value, ai = r.ai || src.camera, slackTs = "")

@@ -89,6 +89,24 @@ class MainActivity : ComponentActivity() {
         if (uri != null) Backup.read(this, uri)
     }
 
+    /** własne zdjęcie auta do bloku Auto (CarPhoto) */
+    private val carPhotoLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) Thread {
+            val err = CarPhoto.set(this, uri)
+            runOnUiThread {
+                android.widget.Toast.makeText(this, if (err == null) "Zdjęcie auta zmienione" else "Nie wczytano – $err", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }.start()
+    }
+
+    fun pickCarPhoto() {
+        try {
+            carPhotoLauncher.launch(arrayOf("image/*"))
+        } catch (_: Exception) {
+            android.widget.Toast.makeText(this, "W radiu nie ma aplikacji do wyboru plików", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
     /** zwykły plik tekstowy (instrukcje dla asystenta): zapis podanego tekstu i odczyt do [onTextFile] */
     private var textToSave = ""
     private var onTextFile: ((String) -> Unit)? = null
@@ -263,6 +281,7 @@ class MainActivity : ComponentActivity() {
         liveCamera.value = Prefs.liveCamera
         removeOldCarModel()
         CanSource.start(this)
+        CarPhoto.load(this)
         Rules.start()
         // po nagłym końcu nawigacji / procesu: przywróć wyskakujące powiadomienia
         NavPopups.apply(this, NavState.info.value != null)

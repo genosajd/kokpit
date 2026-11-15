@@ -63,6 +63,7 @@ object CarVolume {
 
     /** Głośność wzmacniacza radia albo null, gdy to nie radio Witstek. */
     fun mcu(ctx: Context): Int? {
+        if (!Radio.witstek) return null
         val direct = runCatching { android.provider.Settings.System.getString(ctx.contentResolver, KEY)?.toIntOrNull() }
         direct.getOrNull()?.let { return it }
         // Android 12+ może nie wpuścić odczytu niestandardowego klucza – próba przez zapytanie do tabeli

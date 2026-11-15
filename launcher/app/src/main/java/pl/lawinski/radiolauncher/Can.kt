@@ -247,7 +247,7 @@ object CanSource {
         started = true
         val ctx = context.applicationContext
         readFuelSetting(ctx)
-        startLogReader(ctx)
+        if (Radio.witstek) startLogReader(ctx) // ramki CAN w dzienniku wysyła tylko oprogramowanie Witstek
         // drzwi z właściwości systemu co 1 s – tylko gdy nie ma ramek z dziennika (wyłączone / brak zgody)
         val h = Handler(Looper.getMainLooper())
         h.post(object : Runnable {

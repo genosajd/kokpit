@@ -12,6 +12,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
@@ -96,4 +97,55 @@ private fun DrawScope.drawArea(x0: Float, y0: Float, x1: Float, y1: Float, color
 private fun DrawScope.drawPanel(topLeft: Offset, sz: Size, color: Color) {
     drawRoundRect(Color(0xFFF2F4F7), topLeft, sz, CornerRadius(10f, 10f))
     drawRoundRect(color, topLeft, sz, CornerRadius(10f, 10f), style = Stroke(width = 5f))
+}
+
+/**
+ * Własne zdjęcie auta w bloku Auto (Ustawienia → Wygląd → „Zdjęcie auta”) zamiast wbudowanego.
+ * Wybrany plik jest zmniejszany (dłuższy bok do 1600 px) i zapisywany w pamięci Kokpitu jako PNG,
+ * żeby zachować przezroczyste tło. Nie trafia do eksportu ustawień; reset ustawień go usuwa.
+ */
+object CarPhoto {
+    private const val FILE = "car_photo.png"
+    private const val MAX = 1600
+
+    /** własne zdjęcie albo null = wbudowane */
+    val image = androidx.compose.runtime.mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null)
+
+    private fun file(ctx: android.content.Context) = java.io.File(ctx.filesDir, FILE)
+
+    fun load(ctx: android.content.Context) {
+        val f = file(ctx)
+        if (!f.exists()) return
+        Thread {
+            val b = runCatching { android.graphics.BitmapFactory.decodeFile(f.path) }.getOrNull()
+            android.os.Handler(android.os.Looper.getMainLooper()).post { image.value = b?.asImageBitmap() }
+        }.start()
+    }
+
+    /** Wczytuje wybrany plik; zwraca komunikat błędu albo null, gdy się udało. */
+    fun set(ctx: android.content.Context, uri: android.net.Uri): String? = try {
+        val cr = ctx.contentResolver
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        cr.openInputStream(uri)!!.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw IllegalArgumentException("to nie jest obraz")
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= MAX) sample *= 2
+        val raw = cr.openInputStream(uri)!!.use {
+            android.graphics.BitmapFactory.decodeStream(it, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
+        } ?: throw IllegalArgumentException("nie udało się odczytać obrazu")
+        val k = MAX.toFloat() / maxOf(raw.width, raw.height)
+        val bmp = if (k < 1f) android.graphics.Bitmap.createScaledBitmap(raw, (raw.width * k).toInt().coerceAtLeast(1), (raw.height * k).toInt().coerceAtLeast(1), true) else raw
+        val tmp = java.io.File(ctx.filesDir, "$FILE.tmp")
+        tmp.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        if (!tmp.renameTo(file(ctx))) throw IllegalStateException("nie udało się zapisać")
+        image.value = bmp.asImageBitmap()
+        null
+    } catch (e: Exception) {
+        e.message ?: "błąd odczytu"
+    }
+
+    fun clear(ctx: android.content.Context) {
+        runCatching { file(ctx).delete() }
+        image.value = null
+    }
 }

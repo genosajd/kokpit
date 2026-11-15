@@ -373,12 +373,6 @@ fun LauncherScreen(act: MainActivity) {
     }
 }
 
-/** Radio Witstek (YA32): jego pasek stanu nie daje się ukryć i zasłania górę ekranu. */
-val isWitstek: Boolean by lazy {
-    runCatching { Class.forName("android.os.SystemProperties").getMethod("get", String::class.java).invoke(null, "ro.wits.machine.id") as String }
-        .getOrNull().orEmpty().isNotBlank()
-}
-
 /**
  * Ukośny pas światła: w połowie wysokości zajmuje x0..x1, u góry jest przesunięty o [lean] w prawo, u dołu w lewo.
  * Gaśnie w poprzek pasa – od [from] przy lewej krawędzi do [to] przy prawej (na całej wysokości tak samo).
@@ -604,7 +598,7 @@ private fun blockInfo(id: BlockId) = when (id) {
 /** Okno „Widżety” w edycji układu: siatka klocków z podglądem i nazwą; dotknięcie dodaje klocek do ekranu. */
 @Composable
 fun BlockPickerDialog(slots: List<Slot>, onAdd: (BlockId) -> Unit, onClose: () -> Unit) {
-    val free = BlockId.entries.filter { id -> id.multi || slots.none { it.id == id } }
+    val free = BlockId.entries.filter { id -> (id != BlockId.PHONE || Radio.witstek) && (id.multi || slots.none { it.id == id }) }
     Sheet("Dodaj widżet", onClose) {
         if (free.isEmpty()) {
             Text("Wszystkie widżety są już na ekranie.", color = Dim, fontSize = s(24), modifier = Modifier.padding(top = d(30)))
@@ -930,11 +924,18 @@ fun CarBlock(modifier: Modifier, act: MainActivity, apps: List<AppEntry>, edit: 
                         }
                     }
                 }
-                else -> Image(
-                    painterResource(R.drawable.car_f11), "BMW F11",
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.align(Alignment.Center).fillMaxWidth(0.95f).padding(top = d(70)),
-                )
+                else -> {
+                    val own = CarPhoto.image.value
+                    if (own != null) Image(
+                        own, "Auto", contentScale = ContentScale.Fit,
+                        // własne zdjęcie może mieć inne proporcje – mieści się w bloku w całości
+                        modifier = Modifier.align(Alignment.Center).fillMaxWidth(0.95f).fillMaxHeight().padding(top = d(70), bottom = d(16)),
+                    ) else Image(
+                        painterResource(R.drawable.car_f11), "Auto",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.align(Alignment.Center).fillMaxWidth(0.95f).padding(top = d(70)),
+                    )
+                }
             }
 
             Row(Modifier.padding(start = d(34), top = d(30)), verticalAlignment = Alignment.Bottom) {
@@ -986,12 +987,14 @@ fun CarBlock(modifier: Modifier, act: MainActivity, apps: List<AppEntry>, edit: 
             }
 
             Row(Modifier.align(Alignment.BottomEnd).padding(d(26)), verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.kokpitSurface(d(18))
-                        .combinedClickable(onClick = { openCarScreen(act) })
-                        .padding(horizontal = d(16), vertical = d(14)),
-                ) { Text("iDrive", color = Txt, fontSize = s(24), fontWeight = FontWeight.Bold) }
-                Spacer(Modifier.width(d(14)))
+                if (Radio.witstek) {
+                    Box(
+                        Modifier.kokpitSurface(d(18))
+                            .combinedClickable(onClick = { openCarScreen(act) })
+                            .padding(horizontal = d(16), vertical = d(14)),
+                    ) { Text("iDrive", color = Txt, fontSize = s(24), fontWeight = FontWeight.Bold) }
+                    Spacer(Modifier.width(d(14)))
+                }
                 val left = Apps.find(apps, Prefs.splitLeft)
                 val right = Apps.find(apps, Prefs.splitRight)
                 Row(

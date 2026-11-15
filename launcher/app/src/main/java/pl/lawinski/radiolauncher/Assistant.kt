@@ -614,7 +614,7 @@ private object AssistantTools {
                     "Jasność ${value.coerceIn(1, 100)} %"
                 }
             }
-            "idrive_screen" -> { ui { openCarScreen(act) }; "Przełączam na ekran BMW iDrive" }
+            "idrive_screen" -> if (!Radio.witstek) "Ekran auta jest dostępny tylko w radiu Witstek" else { ui { openCarScreen(act) }; "Przełączam na ekran BMW iDrive" }
             "split_screen" -> { ui { openSplit(act, Prefs.splitLeft, Prefs.splitRight) }; "Otwieram podzielony ekran" }
             "radio_settings" -> { ui { openRadioSettings(act) }; "Otwieram ustawienia radia" }
             "android_settings" -> { ui { runCatching { act.startActivity(android.content.Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } }; "Otwieram ustawienia Androida" }
