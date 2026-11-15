@@ -282,7 +282,7 @@ fun SettingsDialog(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("Kokpit F11 0.3.29", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
+                Text("Kokpit F11 0.3.30", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
             }
             Spacer(Modifier.width(d(26)))
             LazyVerticalGrid(
@@ -401,7 +401,7 @@ fun SettingsDialog(
                 item {
                     val key = Prefs.googleKey
                     SettingTile(Icons.Outlined.Key, "Klucz Google Maps",
-                        if (key.isBlank()) "Nie wpisano – asystent nie szuka miejsc ani nie zna czasu dojazdu" else "Wpisany: …" + key.takeLast(4) + " – asystent szuka miejsc i zna korki",
+                        if (key.isBlank()) "Nie wpisano – asystent nie szuka miejsc ani nie zna czasu dojazdu" else "Wpisany: …" + key.takeLast(4) + " – asystent szuka miejsc, zna korki i szuka w YouTube",
                         on = key.isNotBlank()) { onAiField(AiField.GOOGLE_KEY) }
                 }
                 item { SettingTile(Icons.Outlined.Home, "Adres: Dom", Prefs.home.ifBlank { "z Map Google (zapisany Dom)" }) { onAddress(false) } }
@@ -626,8 +626,8 @@ fun SettingsDialog(
                 item {
                     val names = listOf("nie czeka", "czeka krótko", "czeka dłużej")
                     SettingTile(Icons.Outlined.Hearing, "Pauza w zdaniu: " + names[voicePause],
-                        listOf("Okienko asystenta wysyła pytanie przy pierwszej pauzie", "Po pauzie słucha jeszcze ok. 1,5 s, czy mówisz dalej",
-                            "Po pauzie słucha jeszcze ok. 2,5 s – dla wolniejszej mowy; odpowiedź przychodzi później")[voicePause] + ". Dotknij, aby zmienić") {
+                        listOf("Okienko asystenta wysyła pytanie przy pierwszej pauzie", "Po pauzie słucha jeszcze ok. 2,5 s, czy mówisz dalej",
+                            "Po pauzie słucha jeszcze ok. 4 s – dla wolniejszej mowy; odpowiedź przychodzi później")[voicePause] + ". Dotknij, aby zmienić") {
                         voicePause = (voicePause + 1) % 3; Prefs.voicePause = voicePause
                     }
                 }
@@ -701,6 +701,33 @@ fun SettingsDialog(
                     SettingTile(Icons.Outlined.Key, "Slack",
                         if (token.isBlank()) "Nie połączono – wklej User OAuth Token (xoxp-…)" else "Połączono: …" + token.takeLast(4),
                         on = token.isNotBlank()) { onAiField(AiField.SLACK_TOKEN) }
+                }
+                // YouTube: klient OAuth z projektu Google właściciela i logowanie konta kodem z telefonu
+                item {
+                    val id = Prefs.ytClientId
+                    SettingTile(Icons.Outlined.Key, "YouTube: identyfikator klienta",
+                        if (id.isBlank()) "Nie wpisano – potrzebny tylko do logowania konta (playlisty, subskrypcje)" else "Wpisany: " + id.take(8) + "…",
+                        on = id.isNotBlank()) { onAiField(AiField.YT_CLIENT_ID) }
+                }
+                item {
+                    val sec = Prefs.ytClientSecret
+                    SettingTile(Icons.Outlined.Key, "YouTube: sekret klienta",
+                        if (sec.isBlank()) "Nie wpisano" else "Wpisany: …" + sec.takeLast(4),
+                        on = sec.isNotBlank()) { onAiField(AiField.YT_CLIENT_SECRET) }
+                }
+                item {
+                    val v by YouTubeApi.version
+                    var login by remember { mutableStateOf(false) }
+                    val signed = v >= 0 && YouTubeApi.signedIn
+                    SettingTile(Icons.Outlined.PlayCircle, "Konto YouTube",
+                        when {
+                            signed -> "Zalogowane – asystent zna Twoje playlisty, polubione i subskrypcje. Dotknij, aby wylogować"
+                            !YouTubeApi.hasClient -> "Najpierw wpisz identyfikator i sekret klienta"
+                            else -> "Niezalogowane – dotknij, a Kokpit pokaże kod do wpisania na telefonie"
+                        }, on = signed) {
+                        if (signed) { YouTubeApi.signOut(); Assistant.reset() } else if (YouTubeApi.hasClient) login = true
+                    }
+                    if (login) YouTubeLoginDialog { login = false }
                 }
                 // dostępy: każdy włącza/wyłącza dotknięciem (zmiana zaczyna nową rozmowę)
                 item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
@@ -1198,6 +1225,8 @@ enum class AiField(val title: String, val hint: String, val secret: Boolean) {
     SLACK_TOKEN("Slack: User OAuth Token", "xoxp-…", true),
     GOOGLE_KEY("Klucz Google Maps Platform", "AIza…", true),
     ELEVEN_KEY("Klucz API ElevenLabs", "sk_…", true),
+    YT_CLIENT_ID("YouTube: identyfikator klienta OAuth", "….apps.googleusercontent.com", false),
+    YT_CLIENT_SECRET("YouTube: sekret klienta OAuth", "GOCSPX-…", true),
 }
 
 /** Wpisanie klucza API albo nazwy modelu asystenta; puste pole modelu = domyślny. */
@@ -1215,6 +1244,8 @@ fun AiFieldDialog(field: AiField, onClose: () -> Unit) {
                 AiField.SLACK_TOKEN -> Prefs.slackToken
                 AiField.GOOGLE_KEY -> Prefs.googleKey
                 AiField.ELEVEN_KEY -> Prefs.elevenKey
+                AiField.YT_CLIENT_ID -> Prefs.ytClientId
+                AiField.YT_CLIENT_SECRET -> Prefs.ytClientSecret
             }
         )
     }
@@ -1237,7 +1268,8 @@ fun AiFieldDialog(field: AiField, onClose: () -> Unit) {
                     when {
                         field == AiField.TUYA_ID || field == AiField.TUYA_SECRET -> "Projekt „Kokpit F11” → Overview → Authorization Key. Zostaje tylko w radiu."
                         field == AiField.SLACK_TOKEN -> "api.slack.com/apps → Kokpit F11 → OAuth & Permissions → User OAuth Token. Zostaje tylko w radiu."
-                        field == AiField.GOOGLE_KEY -> "console.cloud.google.com → projekt z włączonymi „Places API (New)” i „Routes API” → Dane logowania → klucz API. Zostaje tylko w radiu; płatne według zużycia ponad darmowy limit Google."
+                        field == AiField.GOOGLE_KEY -> "console.cloud.google.com → projekt z włączonymi „Places API (New)”, „Routes API” i – do YouTube – „YouTube Data API v3” → Dane logowania → klucz API. Zostaje tylko w radiu; płatne według zużycia ponad darmowy limit Google."
+                        field == AiField.YT_CLIENT_ID || field == AiField.YT_CLIENT_SECRET -> "console.cloud.google.com → projekt → Platforma uwierzytelniania Google → Klienty → klient typu „TV i urządzenia z ograniczoną możliwością wpisywania”. Zostaje tylko w radiu."
                         field == AiField.ELEVEN_KEY -> "elevenlabs.io → Developers → API Keys. Klucz potrzebuje dostępu do zamiany tekstu na mowę i do listy głosów. Zostaje tylko w radiu; płatne według liczby znaków."
                         field.secret -> "Klucz zostaje tylko w radiu. Za zapytania płacisz u dostawcy według zużycia."
                         else -> "Puste pole = model domyślny (${field.hint})."
@@ -1258,6 +1290,8 @@ fun AiFieldDialog(field: AiField, onClose: () -> Unit) {
                     AiField.SLACK_TOKEN -> { Prefs.slackToken = text; Slack.reset() }
                     AiField.GOOGLE_KEY -> Prefs.googleKey = text
                     AiField.ELEVEN_KEY -> { Prefs.elevenKey = text; Prefs.elevenPausedUntil = 0 }
+                    AiField.YT_CLIENT_ID -> { if (text != Prefs.ytClientId) YouTubeApi.signOut(); Prefs.ytClientId = text }
+                    AiField.YT_CLIENT_SECRET -> Prefs.ytClientSecret = text
                 }
                 Assistant.reset()
                 onClose()

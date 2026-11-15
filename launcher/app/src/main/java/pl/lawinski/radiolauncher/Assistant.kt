@@ -149,17 +149,30 @@ private object AssistantTools {
             listOf("action", "number"),
         ),
         Def(
-            "calendar",
-            "Kalendarz Google właściciela (zsynchronizowany w radiu). list = terminy od dnia date (RRRR-MM-DD, pusty = dziś) przez days dni; zwraca też dzisiejszą datę i godzinę. add = nowy termin: title, date = początek „RRRR-MM-DD GG:MM” (sama data = cały dzień), minutes = czas trwania, location = miejsce (może być puste). Przed add, gdy nie znasz dzisiejszej daty (np. „jutro”), najpierw wywołaj list. Gdy termin ma miejsce, a ktoś chce tam jechać, użyj navigate.",
+            "youtube",
+            "YouTube przez oficjalne API – gdy trzeba wybrać konkretny film, playlistę albo kanał (do zwykłego „włącz X” wystarczy play_youtube). search = wyniki dla query; kind: video (domyślnie), playlist, channel albo live (transmisje na żywo) – każdy wynik ma id. channel_videos = najnowsze filmy kanału o id. playlist = filmy na playliście o id. play = włącza film albo playlistę o id (kind=playlist dla playlisty; show=true pokazuje aplikację, inaczej gra w tle); w query podaj tytuł do potwierdzenia. Dane konta właściciela (tylko gdy konto jest zalogowane): my_playlists = jego playlisty (Polubione mają id LL), subscriptions = subskrybowane kanały, new_from_subscriptions = najnowsze filmy z subskrypcji. Wyszukiwanie zużywa dzienny limit – nie powtarzaj go bez potrzeby.",
             mapOf(
-                "action" to mapOf("type" to "string", "enum" to listOf("list", "add")),
-                "date" to mapOf("type" to "string", "description" to "list: pierwszy dzień RRRR-MM-DD albo pusty; add: RRRR-MM-DD GG:MM albo RRRR-MM-DD"),
+                "action" to mapOf("type" to "string", "enum" to listOf("search", "channel_videos", "playlist", "play", "my_playlists", "subscriptions", "new_from_subscriptions")),
+                "query" to mapOf("type" to "string", "description" to "search: czego szukać; play: tytuł; inaczej pusty"),
+                "kind" to mapOf("type" to "string", "enum" to listOf("", "video", "playlist", "channel", "live"), "description" to "search: rodzaj wyników; play: playlist dla playlisty; inaczej pusty"),
+                "id" to mapOf("type" to "string", "description" to "channel_videos: id kanału; playlist, play: id playlisty albo filmu; inaczej pusty"),
+                "show" to mapOf("type" to "boolean", "description" to "play: true = pokaż aplikację YouTube; inaczej false"),
+            ),
+            listOf("action", "query", "kind", "id", "show"),
+        ),
+        Def(
+            "calendar",
+            "Kalendarz Google właściciela (zsynchronizowany w radiu). list = terminy od dnia date (RRRR-MM-DD, pusty = dziś) przez days dni, każdy z numerem id; zwraca też dzisiejszą datę i godzinę. add = nowy termin: title, date = początek „RRRR-MM-DD GG:MM” (sama data = cały dzień), minutes = czas trwania, location = miejsce (może być puste). update = zmiana terminu o numerze id (z list): podaj tylko to, co ma się zmienić – title, date (nowy początek), minutes (nowy czas trwania), location; reszta pusta / 0. delete = usunięcie terminu o numerze id. Przed update i delete znajdź termin przez list (nie zgaduj id); przed delete powiedz, który termin usuniesz, i usuń dopiero po potwierdzeniu rozmówcy, chyba że jednoznacznie go wskazał. Terminów cyklicznych nie da się tu przesuwać ani usuwać. Przed add, gdy nie znasz dzisiejszej daty (np. „jutro”), najpierw wywołaj list. Gdy termin ma miejsce, a ktoś chce tam jechać, użyj navigate.",
+            mapOf(
+                "action" to mapOf("type" to "string", "enum" to listOf("list", "add", "update", "delete")),
+                "id" to mapOf("type" to "integer", "description" to "update, delete: numer terminu z list; inaczej 0"),
+                "date" to mapOf("type" to "string", "description" to "list: pierwszy dzień RRRR-MM-DD albo pusty; add: RRRR-MM-DD GG:MM albo RRRR-MM-DD; update: nowy początek albo pusty"),
                 "days" to mapOf("type" to "integer", "description" to "list: liczba dni (1 = jeden dzień, 7 = tydzień); add: 0"),
                 "title" to mapOf("type" to "string", "description" to "add: tytuł terminu; list: pusty"),
                 "minutes" to mapOf("type" to "integer", "description" to "add: czas trwania w minutach (np. 60); list: 0"),
                 "location" to mapOf("type" to "string", "description" to "add: miejsce albo pusty; list: pusty"),
             ),
-            listOf("action", "date", "days", "title", "minutes", "location"),
+            listOf("action", "id", "date", "days", "title", "minutes", "location"),
         ),
         Def(
             "notes",
@@ -253,6 +266,7 @@ private object AssistantTools {
             }
             "Nawigacja uruchomiona"
         }
+        "youtube" -> YouTubeApi.run(input) { uri, label, show -> playYoutubeUri(act, android.net.Uri.parse(uri), label, show) }
         "play_youtube" -> playYoutube(act, input.optString("query").trim(), input.optBoolean("show"))
         "media_control" -> mediaControl(act, input.optString("action"), input.optString("app").trim(), input.optLong("seconds"), input.optString("query").trim())
         "camera_control" -> cameraControl(act, input)
@@ -272,14 +286,27 @@ private object AssistantTools {
         if (!KokpitCalendar.granted(act) && !act.requestPermissionsBlocking(KokpitCalendar.PERMISSIONS))
             return "Brak zgody na dostęp do kalendarza – na ekranie radia trzeba zezwolić Kokpitowi na kalendarz."
         return when (input.optString("action")) {
+            "update" -> KokpitCalendar.update(act, input.optLong("id"), input.optString("title"), input.optString("date"), input.optInt("minutes", 0), input.optString("location"))
+            "delete" -> KokpitCalendar.delete(act, input.optLong("id"))
             "add" -> KokpitCalendar.add(act, input.optString("title"), input.optString("date"), input.optInt("minutes", 60).takeIf { it > 0 } ?: 60, input.optString("location"))
             else -> KokpitCalendar.list(act, input.optString("date"), input.optInt("days", 1).coerceAtLeast(1))
         }
     }
 
-    /** Pierwszy film z wyników wyszukiwania YouTube (strona www, bez klucza API) i odtworzenie go w aplikacji. */
+    /**
+     * Pierwszy film dla zapytania i odtworzenie go w aplikacji YouTube. Wyszukuje oficjalnym YouTube Data API
+     * (klucz Google albo zalogowane konto); bez nich – awaryjnie ze strony wyników (do usunięcia przed sklepem Play).
+     */
     private fun playYoutube(act: MainActivity, query: String, show: Boolean = false): String {
         if (query.isEmpty()) return "Brak zapytania"
+        if (YouTubeApi.usable) {
+            try {
+                val v = YouTubeApi.firstVideo(query) ?: return "Nic nie znaleziono w YouTube dla „$query”"
+                return playYoutubeUri(act, android.net.Uri.parse("https://www.youtube.com/watch?v=${v.id}"), v.title.ifBlank { query }, show)
+            } catch (e: Exception) {
+                android.util.Log.w("KokpitYouTube", "API: ${e.message} – szukam po staremu")
+            }
+        }
         val c = URL("https://www.youtube.com/results?hl=pl&search_query=" + java.net.URLEncoder.encode(query, "UTF-8")).openConnection() as HttpURLConnection
         c.connectTimeout = 10000
         c.readTimeout = 15000
@@ -292,8 +319,12 @@ private object AssistantTools {
         val id = m?.groupValues?.get(1) ?: Regex(""""videoId":"([\w-]{11})"""").find(html)?.groupValues?.get(1)
             ?: return "Nic nie znaleziono w YouTube dla „$query”"
         val title = m?.groupValues?.get(2)?.let { runCatching { JSONObject("{\"t\":\"$it\"}").getString("t") }.getOrDefault(it) }
-        val uri = android.net.Uri.parse("https://www.youtube.com/watch?v=$id")
-        if (!show && youtubeInBackground(act, uri)) return "Gra w tle w YouTube (aplikacja nie wyszła na ekran): ${title ?: query}"
+        return playYoutubeUri(act, android.net.Uri.parse("https://www.youtube.com/watch?v=$id"), title ?: query, show)
+    }
+
+    /** Włącza adres YouTube (film albo film z playlistą): w tle, a gdy się nie da albo [show] – na ekranie. */
+    private fun playYoutubeUri(act: MainActivity, uri: android.net.Uri, label: String, show: Boolean): String {
+        if (!show && youtubeInBackground(act, uri)) return "Gra w tle w YouTube (aplikacja nie wyszła na ekran): $label"
         act.runOnUiThread {
             val i = android.content.Intent(android.content.Intent.ACTION_VIEW, uri).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             try {
@@ -302,7 +333,7 @@ private object AssistantTools {
                 runCatching { act.startActivity(i) }
             }
         }
-        return "Odtwarzam w YouTube: ${title ?: query}"
+        return "Odtwarzam w YouTube: $label"
     }
 
     /**
@@ -684,7 +715,7 @@ private const val BASE_PROMPT = """Jesteś asystentem w aucie: ekran radia w BMW
 Odpowiadaj po polsku, krótko i naturalnie, zwykle 1–3 zdaniami – odpowiedzi są czytane na głos, więc pisz zwykłym tekstem, bez list, nagłówków, tabel i znaczników Markdown.
 Pisz tak, jak ma to zostać wypowiedziane, bo lektor czyta tekst dosłownie: czas trwania i miejsce w utworze albo filmie słowami („28 minut 38 sekund”, nigdy 28:38), jednostki i skróty w pełnym brzmieniu („kilometrów na godzinę”, „stopni”, „na przykład”, nie km/h, °C, np.), ułamki z przecinkiem i słowem („siedem i pół litra”), bez symboli typu /, ~, →, &. Godziny zegarowe (14:30), daty i zwykłe liczby zapisuj normalnie.
 Kierowca nie powinien czytać długich tekstów w czasie jazdy, dlatego najważniejsze mów na początku.
-Masz narzędzia: car_status (stan auta, położenie, trasa), navigate i open_saved_place (włączają nawigację w Mapach Google), places (szuka miejsc w Google Maps z ocenami i godzinami otwarcia oraz podaje czas dojazdu z korkami – używaj zamiast zgadywania, gdy ktoś pyta o miejsca w pobliżu albo ile się jedzie), open_app (uruchamia aplikację w radiu i może w niej wyszukać), play_youtube (od razu odtwarza w YouTube to, o co ktoś prosi – w tle, bez pokazywania aplikacji, chyba że ktoś chce oglądać), media_control (pauza, wznowienie, następny, poprzedni, co teraz gra, przewijanie o podany czas lub do podanego miejsca, włączenie wybranego odtwarzacza w tle) i radio_control (głośność, jasność, ekran BMW iDrive, podzielony ekran, ustawienia, wygląd Kokpitu) camera_control (obrót kamery, punkty, zoom), home_ac (klimatyzator w domu: temperatura, wł./wył., ustawienie), calendar (kalendarz Google właściciela: terminy i dodawanie nowych), slack (Slack właściciela: nieprzeczytane, czytanie, szukanie i wysyłanie – zawsze z potwierdzeniem) i camera_snapshot (aktualne zdjęcie z kamery Xiaomi – gdy ktoś pyta, co widać na kamerze, zawsze zrób nowe zdjęcie). Gdy ktoś prosi o włączenie muzyki lub filmu, użyj play_youtube. Gdy pytanie dotyczy auta, paliwa, miejsca albo trasy, najpierw sprawdź car_status. Gdy ktoś prosi o trasę, od razu włącz nawigację i krótko to potwierdź."""
+Masz narzędzia: car_status (stan auta, położenie, trasa), navigate i open_saved_place (włączają nawigację w Mapach Google), places (szuka miejsc w Google Maps z ocenami i godzinami otwarcia oraz podaje czas dojazdu z korkami – używaj zamiast zgadywania, gdy ktoś pyta o miejsca w pobliżu albo ile się jedzie), open_app (uruchamia aplikację w radiu i może w niej wyszukać), play_youtube (od razu odtwarza w YouTube to, o co ktoś prosi – w tle, bez pokazywania aplikacji, chyba że ktoś chce oglądać), youtube (szukanie w YouTube z wyborem konkretnego filmu, playlisty, kanału albo transmisji; po zalogowaniu konta też playlisty, polubione i subskrypcje właściciela), media_control (pauza, wznowienie, następny, poprzedni, co teraz gra, przewijanie o podany czas lub do podanego miejsca, włączenie wybranego odtwarzacza w tle) i radio_control (głośność, jasność, ekran BMW iDrive, podzielony ekran, ustawienia, wygląd Kokpitu) camera_control (obrót kamery, punkty, zoom), home_ac (klimatyzator w domu: temperatura, wł./wył., ustawienie), calendar (kalendarz Google właściciela: terminy, dodawanie, zmiana i usuwanie), slack (Slack właściciela: nieprzeczytane, czytanie, szukanie i wysyłanie – zawsze z potwierdzeniem) i camera_snapshot (aktualne zdjęcie z kamery Xiaomi – gdy ktoś pyta, co widać na kamerze, zawsze zrób nowe zdjęcie). Gdy ktoś prosi o włączenie muzyki lub filmu, użyj play_youtube. Gdy pytanie dotyczy auta, paliwa, miejsca albo trasy, najpierw sprawdź car_status. Gdy ktoś prosi o trasę, od razu włącz nawigację i krótko to potwierdź."""
 
 /** Prompt systemowy: stały opis roli + instrukcje właściciela z Ustawień (jak się zwracać, styl…). */
 private fun systemPrompt(withNotes: Boolean = true): String {

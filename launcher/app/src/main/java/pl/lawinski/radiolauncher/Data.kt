@@ -123,6 +123,23 @@ object Prefs {
         get() = sp.getString("google_key", "") ?: ""
         set(v) = sp.edit().putString("google_key", v).apply()
 
+    /** YouTube (YouTube.kt): klient OAuth z projektu Google właściciela i logowanie konta; tylko w radiu */
+    var ytClientId: String
+        get() = sp.getString("yt_client_id", "") ?: ""
+        set(v) = sp.edit().putString("yt_client_id", v).apply()
+    var ytClientSecret: String
+        get() = sp.getString("yt_client_secret", "") ?: ""
+        set(v) = sp.edit().putString("yt_client_secret", v).apply()
+    var ytRefresh: String
+        get() = sp.getString("yt_refresh", "") ?: ""
+        set(v) = sp.edit().putString("yt_refresh", v).apply()
+    var ytAccess: String
+        get() = sp.getString("yt_access", "") ?: ""
+        set(v) = sp.edit().putString("yt_access", v).apply()
+    var ytAccessUntil: Long
+        get() = sp.getLong("yt_access_until", 0)
+        set(v) = sp.edit().putLong("yt_access_until", v).apply()
+
     /** reguły właściciela (Rules.kt), tablica JSON */
     var rules: String
         get() = sp.getString("rules", "[]") ?: "[]"

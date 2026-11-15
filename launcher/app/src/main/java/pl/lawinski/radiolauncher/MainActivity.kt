@@ -259,6 +259,18 @@ class MainActivity : ComponentActivity() {
                     out.lines().forEach { android.util.Log.i("KokpitTest", it) }
                 }.start()
             }
+            intent.getStringExtra("yt")?.let { json ->
+                Thread {
+                    val out = try { Assistant.testTool(this@MainActivity, "youtube", org.json.JSONObject(json)) } catch (e: Exception) { "błąd: $e" }
+                    out.lines().forEach { android.util.Log.i("KokpitTest", it) }
+                }.start()
+            }
+            intent.getStringExtra("calendar")?.let { json ->
+                Thread {
+                    val out = try { Assistant.testTool(this@MainActivity, "calendar", org.json.JSONObject(json)) } catch (e: Exception) { "błąd: $e" }
+                    out.lines().forEach { android.util.Log.i("KokpitTest", it) }
+                }.start()
+            }
             intent.getStringExtra("places")?.let { json ->
                 Thread {
                     val out = try { Places.run(this@MainActivity, org.json.JSONObject(json)) } catch (e: Exception) { "błąd: $e" }
@@ -375,6 +387,7 @@ class MainActivity : ComponentActivity() {
             if (event.action == android.view.KeyEvent.ACTION_UP) startVoiceAssistant()
             return true
         }
+        if (Phone.takesMediaKey(event.keyCode)) return true // okno telefonu: nie zmieniaj utworu
         return super.dispatchKeyEvent(event)
     }
 

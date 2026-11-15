@@ -196,6 +196,7 @@ class SplitService : AccessibilityService() {
     override fun onKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0)
             android.util.Log.i("KokpitKeys", "klawisz ${KeyEvent.keyCodeToString(event.keyCode)} (${event.keyCode}) z ${event.deviceId}")
+        if (Phone.takesMediaKey(event.keyCode)) return true // okno telefonu: nie zmieniaj utworu
         if (event.keyCode !in VOICE_KEYS) return false
         if (event.action == KeyEvent.ACTION_UP) {
             Speech.stop()

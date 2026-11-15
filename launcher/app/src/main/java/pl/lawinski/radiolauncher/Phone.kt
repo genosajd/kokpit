@@ -222,6 +222,16 @@ object Phone {
     }
 
     /**
+     * Następny / poprzedni utwór z kierownicy przy otwartym oknie telefonu: radio wysyła je też jako zwykłe
+     * klawisze multimediów (KEYCODE_MEDIA_NEXT / PREVIOUS), które zmieniały utwór w odtwarzaczu. Gdy okno
+     * telefonu jest na ekranie, Kokpit je zatrzymuje – przyciski przewijają wtedy tylko ulubionych ([wheel]).
+     */
+    fun takesMediaKey(keyCode: Int): Boolean {
+        if (keyCode != android.view.KeyEvent.KEYCODE_MEDIA_NEXT && keyCode != android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS) return false
+        return windowOpen.value && !call.value.active && MainActivity.live?.visible?.value == true
+    }
+
+    /**
      * Przycisk telefonu przy otwartym oknie: pierwsze naciśnięcie zaznacza ulubionego,
      * następne dzwoni na jego numer główny. Zwraca true, gdy okno telefonu to obsłużyło.
      */

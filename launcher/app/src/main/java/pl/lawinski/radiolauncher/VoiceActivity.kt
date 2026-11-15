@@ -85,7 +85,7 @@ class VoiceActivity : ComponentActivity() {
     private val waitHandler by lazy { android.os.Handler(mainLooper) }
     private var waitRun: Runnable? = null
 
-    private fun pauseMs() = when (Prefs.voicePause) { 0 -> 0L; 2 -> 2600L; else -> 1600L }
+    private fun pauseMs() = when (Prefs.voicePause) { 0 -> 0L; 2 -> 4000L; else -> 2500L }
 
     private fun cancelWait() {
         waitRun?.let { waitHandler.removeCallbacks(it) }
@@ -222,7 +222,11 @@ class VoiceActivity : ComponentActivity() {
         level.value = 0f
         val r = recognizer ?: SpeechRecognizer.createSpeechRecognizer(this).also { recognizer = it }
         r.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onReadyForSpeech(params: Bundle?) {
+                // czas na dalszy ciąg liczymy dopiero od chwili, gdy mikrofon znów słucha –
+                // w wolnym radiu sam ponowny start rozpoznawania zjadał większość pauzy
+                if (more && waitRun != null) waitMore(pauseMs())
+            }
             override fun onBeginningOfSpeech() {
                 // ktoś (albo hałas) zaczął: jeszcze chwila, żeby zdążyły przyjść pierwsze słowa
                 if (more && waitRun != null) waitMore(pauseMs() + 1500)
@@ -267,7 +271,7 @@ class VoiceActivity : ComponentActivity() {
                     else -> waitHandler.postDelayed({
                         if (phase.value == Phase.LISTENING && !isFinishing) {
                             startListening(continued = true)
-                            waitMore(pause)
+                            waitMore(pause + 3000) // zapas na start rozpoznawania; właściwy czas od onReadyForSpeech
                         }
                     }, 60)
                 }
@@ -288,6 +292,15 @@ class VoiceActivity : ComponentActivity() {
                 .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "pl-PL")
                 .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                // prośba o dłuższą ciszę przed końcem wypowiedzi (rozpoznawanie Google nie zawsze jej słucha –
+                // dlatego i tak doklejamy dalszy ciąg po wyniku)
+                .also { i ->
+                    val silence = pauseMs()
+                    if (silence > 0) {
+                        i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, silence)
+                        i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, silence)
+                    }
+                }
                 .putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName),
         )
     }

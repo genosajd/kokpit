@@ -37,6 +37,7 @@ object KokpitCalendar {
             CalendarContract.Instances.TITLE, CalendarContract.Instances.BEGIN, CalendarContract.Instances.END,
             CalendarContract.Instances.ALL_DAY, CalendarContract.Instances.EVENT_LOCATION,
             CalendarContract.Instances.CALENDAR_DISPLAY_NAME, CalendarContract.Instances.DESCRIPTION,
+            CalendarContract.Instances.EVENT_ID, CalendarContract.Instances.RRULE,
         )
         val day = SimpleDateFormat("EEEE d.MM", PL)
         val hour = SimpleDateFormat("HH:mm", PL)
@@ -57,6 +58,8 @@ object KokpitCalendar {
                     if (loc.isNotEmpty()) append(" · miejsce: $loc")
                     if (desc.isNotEmpty()) append(" · opis: $desc")
                     append(" · kalendarz: $cal")
+                    append(" · id ${c.getLong(7)}")
+                    if (!c.getString(8).isNullOrBlank()) append(" (cykliczny)")
                 }
             }
         }
@@ -98,6 +101,76 @@ object KokpitCalendar {
         if (allDay) return "Dodano „$title” na cały dzień $start do kalendarza ${cal.name}."
         val f = SimpleDateFormat("EEEE d MMMM, HH:mm", PL)
         return "Dodano „$title” – ${f.format(values.getAsLong(CalendarContract.Events.DTSTART))} (${minutes.coerceIn(5, 1440)} min) do kalendarza ${cal.name} (id ${ContentUris.parseId(uri)})."
+    }
+
+    private class Ev(val title: String, val start: Long, val end: Long, val allDay: Boolean, val recurring: Boolean)
+
+    private fun event(ctx: Context, id: Long): Ev? {
+        val proj = arrayOf(
+            CalendarContract.Events.TITLE, CalendarContract.Events.DTSTART, CalendarContract.Events.DTEND,
+            CalendarContract.Events.ALL_DAY, CalendarContract.Events.RRULE,
+        )
+        val uri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id)
+        return ctx.contentResolver.query(uri, proj, "${CalendarContract.Events.DELETED}=0", null, null)?.use { c ->
+            if (!c.moveToFirst()) null
+            else Ev(c.getString(0).orEmpty(), c.getLong(1), c.getLong(2), c.getInt(3) == 1, !c.getString(4).isNullOrBlank())
+        }
+    }
+
+    private const val RECURRING = "to termin cykliczny – taką zmianę trzeba zrobić w Kalendarzu Google (tu zmieniłaby się cała seria)."
+
+    /**
+     * Zmienia termin o numerze [id] (z list): puste pole / minutes = 0 zostaje bez zmian.
+     * W terminach cyklicznych tylko tytuł i miejsce (dla całej serii) – czasu nie ruszamy.
+     */
+    fun update(ctx: Context, id: Long, title: String, start: String, minutes: Int, location: String): String {
+        val ev = event(ctx, id) ?: return "Nie ma terminu o id $id – wywołaj list, żeby zobaczyć numery terminów."
+        val values = ContentValues()
+        val changed = mutableListOf<String>()
+        if (title.isNotBlank()) { values.put(CalendarContract.Events.TITLE, title.trim()); changed += "tytuł „${title.trim()}”" }
+        if (location.isNotBlank()) { values.put(CalendarContract.Events.EVENT_LOCATION, location.trim()); changed += "miejsce „${location.trim()}”" }
+        if (start.isNotBlank() || minutes > 0) {
+            if (ev.recurring) return "Termin „${ev.title}”: $RECURRING"
+            val allDay = if (start.isBlank()) ev.allDay else !start.contains(':')
+            if (allDay) {
+                if (start.isBlank()) return "Termin „${ev.title}” jest całodniowy – żeby nadać mu czas trwania, podaj też początek RRRR-MM-DD GG:MM."
+                val d = SimpleDateFormat("yyyy-MM-dd", PL).apply { timeZone = TimeZone.getTimeZone("UTC") }
+                val b = runCatching { d.parse(start.trim())!!.time }.getOrNull() ?: return "Zła data „$start” – podaj RRRR-MM-DD albo RRRR-MM-DD GG:MM"
+                val days = if (ev.allDay) ((ev.end - ev.start) / 86_400_000L).coerceAtLeast(1) else 1
+                values.put(CalendarContract.Events.DTSTART, b)
+                values.put(CalendarContract.Events.DTEND, b + days * 86_400_000L)
+                values.put(CalendarContract.Events.ALL_DAY, 1)
+                values.put(CalendarContract.Events.EVENT_TIMEZONE, "UTC")
+                changed += "cały dzień ${start.trim()}"
+            } else {
+                val b = if (start.isBlank()) ev.start else {
+                    val f = SimpleDateFormat("yyyy-MM-dd HH:mm", PL)
+                    runCatching { f.parse(start.trim().replace('T', ' '))!!.time }.getOrNull() ?: return "Zła data „$start” – podaj RRRR-MM-DD GG:MM"
+                }
+                val len = when {
+                    minutes > 0 -> minutes.coerceIn(5, 24 * 60) * 60_000L
+                    !ev.allDay && ev.end > ev.start -> ev.end - ev.start
+                    else -> 3_600_000L
+                }
+                values.put(CalendarContract.Events.DTSTART, b)
+                values.put(CalendarContract.Events.DTEND, b + len)
+                values.put(CalendarContract.Events.ALL_DAY, 0)
+                values.put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
+                changed += "${SimpleDateFormat("EEEE d MMMM, HH:mm", PL).format(b)} (${len / 60_000} min)"
+            }
+        }
+        if (values.size() == 0) return "Nie podano, co zmienić w terminie „${ev.title}”."
+        val n = ctx.contentResolver.update(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id), values, null, null)
+        return if (n > 0) "Zmieniono termin „${ev.title}”: ${changed.joinToString(", ")}."
+        else "Nie udało się zmienić terminu „${ev.title}” – kalendarz może być tylko do odczytu."
+    }
+
+    /** Usuwa termin o numerze [id] (z list); cyklicznych nie rusza. */
+    fun delete(ctx: Context, id: Long): String {
+        val ev = event(ctx, id) ?: return "Nie ma terminu o id $id – wywołaj list, żeby zobaczyć numery terminów."
+        if (ev.recurring) return "Termin „${ev.title}”: $RECURRING"
+        val n = ctx.contentResolver.delete(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id), null, null)
+        return if (n > 0) "Usunięto termin „${ev.title}”." else "Nie udało się usunąć terminu „${ev.title}” – kalendarz może być tylko do odczytu."
     }
 
     private class Cal(val id: Long, val name: String, val writable: Boolean)

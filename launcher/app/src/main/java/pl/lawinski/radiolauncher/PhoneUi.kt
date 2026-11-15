@@ -629,6 +629,18 @@ fun PhoneDialog(act: MainActivity, search: Boolean, onClose: () -> Unit) {
     }
     val shape = LocalTheme.current.shape(d(28))
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        // okno telefonu to osobne okno Androida: klawisze „następny / poprzedni utwór” z kierownicy zatrzymujemy tutaj,
+        // inaczej system oddaje je odtwarzaczowi (kierownica ma wtedy tylko przewijać ulubionych)
+        val dialogView = androidx.compose.ui.platform.LocalView.current
+        androidx.compose.runtime.DisposableEffect(dialogView) {
+            val w = (dialogView.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
+            val old = w?.callback
+            if (w != null && old != null) w.callback = object : android.view.Window.Callback by old {
+                override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean =
+                    Phone.takesMediaKey(event.keyCode) || old.dispatchKeyEvent(event)
+            }
+            onDispose { if (w != null && old != null) w.callback = old }
+        }
         Column(
             Modifier.fillMaxWidth(0.955f).fillMaxHeight(if (call.active) 0.8f else 0.95f).clip(shape)
                 .background(if (LightMode.on) Color(0xFFF4F6FA) else Color(0xFF0A0D14))
