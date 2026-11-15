@@ -122,6 +122,7 @@ class VoiceActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Prefs.init(this)
+        live = this
         setContent { VoiceOverlay() }
         begin()
     }
@@ -136,6 +137,7 @@ class VoiceActivity : ComponentActivity() {
         recognizer?.destroy()
         recognizer = null
         open = false
+        if (live === this) live = null
         Hotword.resume()
         super.onDestroy()
     }
@@ -449,6 +451,17 @@ class VoiceActivity : ComponentActivity() {
         /** okienko jest na ekranie – asystent nie pokazuje wtedy odpowiedzi w dymku */
         @Volatile
         var open = false
+
+        @Volatile
+        private var live: VoiceActivity? = null
+
+        /** Zamyka okienko (np. gdy zaczyna się rozmowa telefoniczna); true = było otwarte. */
+        fun closeIfOpen(): Boolean {
+            val a = live ?: return false
+            if (a.isFinishing) return false
+            a.runOnUiThread { a.stopAndClose() }
+            return true
+        }
 
         fun start(ctx: android.content.Context) {
             ctx.startActivity(Intent(ctx, VoiceActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

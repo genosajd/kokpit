@@ -153,11 +153,14 @@ object Phone {
                 val since = if (state == ACTIVE && !prev.answered) now else if (fresh) now else prev.since
                 val inbound = if (fresh) state == INCOMING else prev.inbound
                 call.value = Call(state, number, name, since, inbound, answered)
+                // zaczyna się rozmowa (np. asystent właśnie zadzwonił) – okienko asystenta znika, zostaje okno rozmowy
+                val voice = fresh && VoiceActivity.closeIfOpen()
                 when {
                     // przychodzące: okno zawsze (nawet gdy Kokpit na wierzchu, żeby nie przegapić)
                     state == INCOMING && prev.state != INCOMING -> { minimized.value = false; CallPill.hide(); CallActivity.open(ctx) }
                     // wychodzące: okno tylko, gdy Kokpit nie jest na ekranie (inaczej widać blok / okno telefonu)
-                    state == OUTGOING && prev.state != OUTGOING -> showWindow(ctx)
+                    // (po zamknięciu okienka asystenta okno rozmowy zawsze, żeby było widać, że dzwoni)
+                    state == OUTGOING && prev.state != OUTGOING -> if (voice) CallActivity.open(ctx) else showWindow(ctx)
                 }
             }
             else -> {
