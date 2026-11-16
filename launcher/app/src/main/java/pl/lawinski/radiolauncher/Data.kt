@@ -185,6 +185,16 @@ object Prefs {
         get() = sp.getString("phone_button", "kokpit")!!
         set(v) = sp.edit().putString("phone_button", v).apply()
 
+    /** widok cofania: "" = oryginalny widok radia (ekran BMW), "kokpit" = własny widok Kokpitu (Reverse.kt) */
+    var reverseView: String
+        get() = sp.getString("reverse_view", "")!!
+        set(v) = sp.edit().putString("reverse_view", v).apply()
+
+    /** widok cofania Kokpitu: ostatnio wybrany tryb – sama kamera na pełny ekran zamiast kamery z czujnikami */
+    var reverseFull: Boolean
+        get() = sp.getBoolean("reverse_full", false)
+        set(v) = sp.edit().putBoolean("reverse_full", v).apply()
+
     /** rodzaj radia: "" = wykrywany automatycznie, "witstek", "inne" (patrz Radio.kt) */
     var radioMode: String
         get() = sp.getString("radio_mode", "")!!

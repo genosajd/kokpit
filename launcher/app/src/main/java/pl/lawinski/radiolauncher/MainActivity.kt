@@ -265,6 +265,13 @@ class MainActivity : ComponentActivity() {
                     out.lines().forEach { android.util.Log.i("KokpitTest", it) }
                 }.start()
             }
+            intent.getStringExtra("cam")?.let { CamProbe.grab(this@MainActivity, it) }
+            intent.getStringExtra("reverse")?.let { v ->
+                // "on" / "off" albo osiem stopni czujników po przecinku (przód L→P, tył L→P; 10 = brak)
+                Reverse.test = true
+                val sens = v.split(",").mapNotNull { it.trim().toIntOrNull() }.takeIf { it.size == 8 } ?: Reverse.state.value.sensors
+                runOnUiThread { Reverse.set(this@MainActivity, v != "off", sens); if (v != "off") ReverseActivity.open(this@MainActivity) }
+            }
             intent.getStringExtra("calendar")?.let { json ->
                 Thread {
                     val out = try { Assistant.testTool(this@MainActivity, "calendar", org.json.JSONObject(json)) } catch (e: Exception) { "błąd: $e" }

@@ -282,7 +282,7 @@ fun SettingsDialog(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("Kokpit F11 0.3.30", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
+                Text("Kokpit F11 0.3.31", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
             }
             Spacer(Modifier.width(d(26)))
             LazyVerticalGrid(
@@ -429,8 +429,24 @@ fun SettingsDialog(
                     6 -> {
                 if (Radio.witstek) {
                     item {
-                        SettingTile(Icons.Outlined.Warning, "Ostrzeżenie „Zapnij pasy”", if (beltOn.value) "Tylko w czasie jazdy; sygnał z CAN może obejmować puste fotele" else "Ostrzega zestaw wskaźników BMW", on = beltOn.value) {
+                        SettingTile(Icons.Outlined.Warning, "Ostrzeżenie „Zapnij pasy”", if (beltOn.value) "Gdy kierowca jedzie bez zapiętego pasa" else "Ostrzega zestaw wskaźników BMW", on = beltOn.value) {
                             beltOn.value = !beltOn.value; Prefs.beltWarn = beltOn.value
+                        }
+                    }
+                    item {
+                        var rv by remember { mutableStateOf(Prefs.reverseView) }
+                        val kokpit = rv == "kokpit"
+                        val overlay = android.provider.Settings.canDrawOverlays(act)
+                        SettingTile(
+                            Icons.Outlined.Videocam, "Widok cofania",
+                            if (!kokpit) "Oryginalny (ekran BMW)"
+                            else if (!overlay) "Kokpit – włącz „wyświetlanie nad innymi”, inaczej widok się nie otworzy"
+                            else "Kokpit: kamera i czujniki; wymaga dzienników radia",
+                            on = kokpit,
+                        ) {
+                            rv = if (kokpit) "" else "kokpit"; Prefs.reverseView = rv
+                            if (rv == "kokpit" && act.checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+                                act.requestPermissions(arrayOf(android.Manifest.permission.CAMERA), 0)
                         }
                     }
                     item {

@@ -18,6 +18,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.WRITE_CONTACTS" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -113,6 +116,17 @@
             android:exported="false"
             android:theme="@style/Theme.RadioLauncher.Voice"
             android:taskAffinity="pl.lawinski.radiolauncher.call"
+            android:launchMode="singleTask"
+            android:excludeFromRecents="true"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|navigation|uiMode|density" />
+
+        <!-- widok cofania Kokpitu: kamera BMW i czujniki parkowania, nad dowolną aplikacją -->
+        <activity
+            android:name=".ReverseActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RadioLauncher"
+            android:taskAffinity="pl.lawinski.radiolauncher.reverse"
             android:launchMode="singleTask"
             android:excludeFromRecents="true"
             android:screenOrientation="sensorLandscape"

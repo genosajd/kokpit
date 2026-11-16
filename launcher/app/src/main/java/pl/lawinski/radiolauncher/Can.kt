@@ -23,7 +23,8 @@ import android.util.Log
  * - `data[6]`: bity 7/6/5/4 = drzwi LP/PP/LT/PT (przy kierownicy po lewej), bit 3 = klapa;
  * - `data[7]`: paliwo w litrach (0..127);
  * - `data[3]`: bieg 0=P 1=R 2=N 4=D 5=S 6=M;
- * - `data[8]` bity 7..6 == 1: niezapięty pas;
+ * - `data[8]` bit 6 (0x40) = pas kierowcy ZAPIĘTY, bit 4 (0x10) = pas pasażera zapięty
+ *   (sprawdzone w aucie 2026-11-16); ostrzeżenie tylko dla kierowcy – o pasażerze nie wiadomo, czy siedzi;
  * - `data[9]`: temperatura zewnętrzna × 2 (bit 7 = minus); np. 0x0D = 6,5 °C.
  * Prędkość auta usługa radia wystawia we właściwości systemowej `can.speed` (km/h), a bajt drzwi w `can.door`
  * – te dwie rzeczy działają bez dzienników (Prefs.canLogs wyłączone = bez okienka zgody Androida 13,
@@ -79,7 +80,7 @@ object CanSource {
         val gear = when (d[3].toInt()) {
             0 -> "P"; 1 -> "R"; 2 -> "N"; 4 -> "D"; 5 -> "S"; 6 -> "M"; else -> null
         }
-        val belt = d.size > 8 && (d[8].toInt() shr 6) and 3 == 1
+        val belt = d.size > 8 && d[8].toInt() and 0x40 == 0
         val temp = if (d.size > 9) {
             val t = d[9].toInt()
             (t and 0x7F) / 2f * (if (t and 0x80 != 0) -1 else 1)
@@ -231,6 +232,8 @@ object CanSource {
                         if (isPhoneKey(bytes) && at >= since - 2000) main.post { phoneKey(ctx) }
                         if (at >= since - 2000) wheelKey(bytes)?.let { delta -> main.post { Phone.wheel(delta) } }
                         if (at >= since - 2000) tiltKey(bytes)?.let { code -> main.post { tilt(code) } }
+                        // czujniki parkowania i sygnał cofania (Reverse.kt)
+                        if (bytes.size > 11 && bytes[1].toInt() == 0x61) { val fresh = at >= since - 2000; main.post { Reverse.frame(ctx, bytes, fresh) } }
                     }
                     p.waitFor()
                     logProc = null
