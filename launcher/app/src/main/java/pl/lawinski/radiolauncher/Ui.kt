@@ -1518,7 +1518,12 @@ private fun ChatLines(
                     Modifier.fillMaxWidth(bubble), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = if (l.fromUser) Arrangement.End else Arrangement.Start,
                 ) {
-                    if (l.fromUser) trash()
+                    // duże okno: kiedy wiadomość powstała (dziś sama godzina, wczoraj i dawniej z dniem)
+                    val time: @Composable () -> Unit = {
+                        val t = if (onDelete != null) lineTime(l.time) else ""
+                        if (t.isNotEmpty()) Text(t, color = Dim, fontSize = s(16), maxLines = 1, modifier = Modifier.padding(horizontal = d(6)))
+                    }
+                    if (l.fromUser) { time(); trash() }
                     Text(
                         shown, color = if (l.fromUser) LocalTheme.current.activeText else Txt, fontSize = s(22), lineHeight = s(30),
                         modifier = Modifier.weight(1f, fill = false)
@@ -1526,7 +1531,7 @@ private fun ChatLines(
                             .combinedClickable(onClick = { copyText(act, shown) }, onLongClick = { if (!l.fromUser) act.speak(l.text) })
                             .padding(horizontal = d(16), vertical = d(10)),
                     )
-                    if (!l.fromUser) trash()
+                    if (!l.fromUser) { trash(); time() }
                 }
             }
         }

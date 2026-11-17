@@ -39,14 +39,38 @@ import java.util.Locale
  */
 
 /** Jedna wypowiedź w rozmowie widoczna w bloku. */
-data class ChatLine(val fromUser: Boolean, val text: String)
+/** [time] – kiedy powstała (ms); 0 = nieznany (rozmowy zapisane przed wersją 0.3.34). */
+data class ChatLine(val fromUser: Boolean, val text: String, val time: Long = System.currentTimeMillis())
+
+/** Data i godzina dopisywane do wypowiedzi rozmówcy dla modelu, np. „[wtorek 17 listopada 2026, 10:52]”. */
+internal fun stamp(time: Long): String =
+    "[" + java.text.SimpleDateFormat("EEEE d MMMM yyyy, HH:mm", Locale("pl", "PL")).format(java.util.Date(time)) + "] "
+
+/** Czas wiadomości do pokazania w rozmowie: dziś sama godzina, wczoraj „wczoraj 14:32”, dawniej z datą. */
+internal fun lineTime(time: Long): String {
+    if (time <= 0L) return ""
+    val pl = Locale("pl", "PL")
+    val day = java.text.SimpleDateFormat("yyyyMMdd", pl)
+    val hm = java.text.SimpleDateFormat("HH:mm", pl).format(java.util.Date(time))
+    val now = System.currentTimeMillis()
+    return when (day.format(java.util.Date(time))) {
+        day.format(java.util.Date(now)) -> hm
+        day.format(java.util.Date(now - 86_400_000L)) -> "wczoraj $hm"
+        else -> java.text.SimpleDateFormat("d MMM", pl).format(java.util.Date(time)) + " $hm"
+    }
+}
 
 /** Wynik narzędzia: tekst i opcjonalnie zdjęcie JPEG (base64). */
 private class ToolOut(val text: String, val jpeg: String? = null)
 
 /** Narzędzia asystenta – wspólne dla obu dostawców. */
 private object AssistantTools {
-    class Def(val name: String, val description: String, val props: Map<String, Map<String, Any>>, val required: List<String>)
+    /**
+     * [strict] – ścisłe trzymanie się schematu po stronie dostawcy. Claude ma limit łącznego rozmiaru ścisłych
+     * schematów (błąd 400 „compiled grammar is too large”), więc nowe, rozbudowane narzędzia dostają false –
+     * pola czytamy wtedy z wartościami domyślnymi.
+     */
+    class Def(val name: String, val description: String, val props: Map<String, Map<String, Any>>, val required: List<String>, val strict: Boolean = true)
 
     val all = listOf(
         Def(
@@ -120,6 +144,20 @@ private object AssistantTools {
             listOf("camera"),
         ),
         Def(
+            "camera_history",
+            "Historia kamery Xiaomi z karty pamięci (ok. 12 dni wstecz). events = zdarzenia wykryte przez kamerę (ruch, osoba, auto, osoba przy aucie, wejście w strefę) danego dnia między godzinami from i to. frame = zdjęcie z nagrania z chwili time – zobaczysz je i opiszesz. Gdy ktoś pyta, czy o jakiejś porze ktoś był pod domem albo stało auto: najpierw events dla tego zakresu godzin; potem obejrzyj klatki z chwil zdarzeń, a gdy zdarzeń nie ma albo wykrywanie w kamerze jest wyłączone – klatki z pytanej pory. Jedna klatka trwa kilkanaście sekund i przerywa na ten czas podgląd kamery na żywo, więc bierz najwyżej cztery na jedno pytanie i uprzedź, że to chwilę potrwa. Podawaj godzinę, z której naprawdę jest zdjęcie.",
+            mapOf(
+                "action" to mapOf("type" to "string", "enum" to listOf("events", "frame")),
+                "camera" to mapOf("type" to "string", "description" to "Nazwa kamery; pusty tekst = bieżąca"),
+                "date" to mapOf("type" to "string", "description" to "Dzień RRRR-MM-DD; pusty tekst = dziś"),
+                "from" to mapOf("type" to "string", "description" to "events: od godziny GG:MM; pusty tekst = od początku dnia"),
+                "to" to mapOf("type" to "string", "description" to "events: do godziny GG:MM; pusty tekst = do końca dnia"),
+                "time" to mapOf("type" to "string", "description" to "frame: godzina GG:MM albo GG:MM:SS; inaczej pusty tekst"),
+            ),
+            listOf("action", "camera", "date", "from", "to", "time"),
+            strict = false,
+        ),
+        Def(
             "camera_control",
             "Steruje kamerą Xiaomi z obrotem: list = kamery i co umieją, move = obrót w kierunku direction przez amount sekund (0.1–4; ok. 1 s to niewielki obrót), points = zapisane punkty 1–3, goto = obrót do punktu nr amount, zoom = przybliżenie amount (1–9). Po obrocie zrób camera_snapshot, żeby zobaczyć efekt. Pusta nazwa kamery = kamera z bloku Kamera.",
             mapOf(
@@ -149,6 +187,7 @@ private object AssistantTools {
                 "value" to mapOf("type" to "string", "description" to "set: wartość; inaczej pusty tekst"),
             ),
             listOf("action", "device", "code", "value"),
+            strict = false,
         ),
         Def(
             "phone",
@@ -225,37 +264,140 @@ private object AssistantTools {
 
     fun run(act: MainActivity, name: String, input: JSONObject): ToolOut =
         if (!Access.allows(name)) ToolOut("Właściciel wyłączył ten dostęp w Ustawieniach Kokpitu → Asystent AI → Dostępy.")
-        else if (name == "camera_snapshot") snapshot(act, input.optString("camera").trim()) else ToolOut(runText(act, name, input))
+        else if (name == "camera_snapshot") snapshot(act, input.optString("camera").trim())
+        else if (name == "camera_history") cameraHistory(act, input)
+        else ToolOut(runText(act, name, input))
 
-    /** Klatka z kamery: go2rtc w Xiaomi Cam daje krótki plik api/frame.mp4, z którego bierzemy pierwszy obraz. */
-    fun snapshot(act: MainActivity, wanted: String): ToolOut {
+    /** Kamera o podanej nazwie (pusta = kamera z bloku); drugi element = komunikat, gdy się nie udało. */
+    private fun pickCamera(act: MainActivity, wanted: String): Pair<String?, String> {
         val names = kotlinx.coroutines.runBlocking { XiaomiCamServer.camerasWaking(act) }
-            ?: return ToolOut("Xiaomi Cam nie odpowiada – kamera niedostępna (aplikacja i jej serwer w tle muszą działać)")
+            ?: return null to "Xiaomi Cam nie odpowiada – kamera niedostępna (aplikacja i jej serwer w tle muszą działać)"
         val cams = names.filter { !it.startsWith("__") }
         val w = wanted.lowercase()
         val cam = when {
             wanted.isEmpty() -> act.liveCamera.value.takeIf { it in cams } ?: cams.firstOrNull()
             else -> cams.firstOrNull { it.lowercase() == w } ?: cams.firstOrNull { w in it.lowercase() || it.lowercase() in w }
-        } ?: return ToolOut("Nie ma kamery „$wanted”. Kamery: ${cams.joinToString()}")
-        val f = java.io.File(act.cacheDir, "frame.mp4")
-        val c = URL("http://127.0.0.1:11984/api/frame.mp4?src=" + java.net.URLEncoder.encode(cam, "UTF-8").replace("+", "%20")).openConnection() as HttpURLConnection
+        }
+        return cam to "Nie ma kamery „$wanted”. Kamery: ${cams.joinToString()}"
+    }
+
+    private fun camApi(path: String, cam: String, extra: String, readMs: Int): HttpURLConnection {
+        val c = URL("http://127.0.0.1:11984/$path?src=" + java.net.URLEncoder.encode(cam, "UTF-8").replace("+", "%20") + extra).openConnection() as HttpURLConnection
         c.connectTimeout = 5000
-        c.readTimeout = 30000
-        if (c.responseCode != 200) return ToolOut("Kamera „$cam” nie dała obrazu (HTTP ${c.responseCode})")
-        c.inputStream.use { inp -> f.outputStream().use { inp.copyTo(it) } }
+        c.readTimeout = readMs
+        return c
+    }
+
+    /** Pierwszy obraz z krótkiego pliku MP4 (jedna klatka kluczowa) jako JPEG base64, najwyżej 1280 px szerokości. */
+    private fun frameJpeg(f: java.io.File): String? {
         val mmr = android.media.MediaMetadataRetriever()
         val bmp = try {
             mmr.setDataSource(f.path)
             mmr.getFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+        } catch (e: Exception) {
+            null
         } finally {
             mmr.release()
-        } ?: return ToolOut("Nie udało się odczytać klatki z kamery „$cam”")
+        } ?: return null
         val scale = minOf(1f, 1280f / bmp.width)
         val small = if (scale < 1f) android.graphics.Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true) else bmp
         val out = java.io.ByteArrayOutputStream()
         small.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, out)
+        return android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP)
+    }
+
+    /** Klatka z kamery: go2rtc w Xiaomi Cam daje krótki plik api/frame.mp4, z którego bierzemy pierwszy obraz. */
+    fun snapshot(act: MainActivity, wanted: String): ToolOut {
+        val (cam, problem) = pickCamera(act, wanted)
+        if (cam == null) return ToolOut(problem)
+        val f = java.io.File(act.cacheDir, "frame.mp4")
+        val c = camApi("api/frame.mp4", cam, "", 30000)
+        if (c.responseCode != 200) return ToolOut("Kamera „$cam” nie dała obrazu (HTTP ${c.responseCode})")
+        c.inputStream.use { inp -> f.outputStream().use { inp.copyTo(it) } }
+        val jpeg = frameJpeg(f) ?: return ToolOut("Nie udało się odczytać klatki z kamery „$cam”")
         val time = java.text.SimpleDateFormat("HH:mm", Locale("pl", "PL")).format(java.util.Date())
-        return ToolOut("Zdjęcie z kamery „$cam” zrobione o $time.", android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP))
+        return ToolOut("Zdjęcie z kamery „$cam” zrobione o $time.", jpeg)
+    }
+
+    private val EVENT_NAMES = mapOf(
+        "ObjectMotion" to "ruch", "PeopleMotion" to "osoba", "CarDetected" to "auto", "PersonApproaching" to "osoba przy aucie",
+        "FenceIn" to "wejście w strefę", "FenceOut" to "wyjście ze strefy", "Face" to "twarz", "Pet" to "zwierzę",
+        "BabyCry" to "płacz dziecka", "AI" to "zdarzenie AI",
+    )
+
+    /** „GG:MM” albo „GG:MM:SS” → sekunda dnia; null = zły zapis. */
+    private fun daySecond(v: String): Int? {
+        val p = v.trim().split(":").map { it.toIntOrNull() ?: return null }
+        if (p.size !in 2..3 || p[0] !in 0..23 || p[1] !in 0..59 || (p.size == 3 && p[2] !in 0..59)) return null
+        return p[0] * 3600 + p[1] * 60 + (p.getOrNull(2) ?: 0)
+    }
+
+    /**
+     * Historia kamery z karty pamięci przez lokalne API Xiaomi Cam (od wersji 1.36): lista zdarzeń dnia
+     * (api/xc/events) i jedna klatka nagrania z podanej chwili (api/xc/history.mp4, nagłówek X-Frame-Time).
+     */
+    private fun cameraHistory(act: MainActivity, input: JSONObject): ToolOut {
+        val pl = Locale("pl", "PL")
+        val dayFmt = java.text.SimpleDateFormat("yyyy-MM-dd", pl).apply { isLenient = false }
+        val dateText = input.optString("date").trim().ifEmpty { dayFmt.format(java.util.Date()) }
+        val day = runCatching { dayFmt.parse(dateText) }.getOrNull() ?: return ToolOut("Zła data „$dateText” – podaj RRRR-MM-DD")
+        val (cam, problem) = pickCamera(act, input.optString("camera").trim())
+        if (cam == null) return ToolOut(problem)
+        val dayName = java.text.SimpleDateFormat("EEEE d MMMM", pl).format(day)
+        val hms = java.text.SimpleDateFormat("HH:mm:ss", pl)
+        val old = "Aplikacja Xiaomi Cam w radiu jest za stara – historia kamery wymaga wersji 1.36 lub nowszej."
+        when (input.optString("action")) {
+            "events" -> {
+                val from = input.optString("from").trim().let { if (it.isEmpty()) 0 else daySecond(it) ?: return ToolOut("Zła godzina „$it” – podaj GG:MM") }
+                val to = input.optString("to").trim().let { if (it.isEmpty()) 86400 else daySecond(it) ?: return ToolOut("Zła godzina „$it” – podaj GG:MM") }
+                val c = camApi("api/xc/events", cam, "&day=$dateText", 30000)
+                val code = c.responseCode
+                if (code != 200) {
+                    val body = runCatching { c.errorStream?.bufferedReader()?.readText().orEmpty() }.getOrDefault("").trim()
+                    return ToolOut(if (code == 404 && !body.contains("stream", true)) old else "Kamera „$cam” nie podała zdarzeń: ${body.ifEmpty { "HTTP $code" }}. Kamera przyjmuje jedno połączenie naraz – jeśli ktoś ją teraz ogląda gdzie indziej, spróbuj za chwilę.")
+                }
+                val o = JSONObject(c.inputStream.bufferedReader().readText())
+                val base = day.time / 1000
+                val all = o.optJSONArray("events") ?: JSONArray()
+                val list = (0 until all.length()).map { all.getJSONObject(it) }
+                    .filter { (it.optLong("time") - base) in from..to }.sortedBy { it.optLong("time") }
+                val det = o.optJSONObject("detection")
+                val detNote = when {
+                    det == null -> ""
+                    !det.optBoolean("on") -> "\nUwaga: wykrywanie zdarzeń w tej kamerze jest wyłączone, więc kamera nie zapisuje zdarzeń (włącza się je w aplikacji Xiaomi Home albo w Xiaomi Cam na komputerze). Brak zdarzeń nic tu nie znaczy – obejrzyj klatki nagrania (frame)."
+                    else -> "\nKamera wykrywa: " + listOfNotNull("ruch".takeIf { det.optBoolean("motion") }, "osoby".takeIf { det.optBoolean("person") },
+                        "auta w wyznaczonej strefie".takeIf { det.optBoolean("car") }, "wejście w wyznaczoną strefę".takeIf { det.optBoolean("fence") })
+                        .ifEmpty { listOf("nic – wszystkie rodzaje wykrywania są wyłączone") }.joinToString() + "."
+                }
+                val range = if (from == 0 && to == 86400) "" else " między ${input.optString("from").ifBlank { "00:00" }} a ${input.optString("to").ifBlank { "24:00" }}"
+                if (list.isEmpty()) return ToolOut("Kamera „$cam”, $dayName$range: brak zapisanych zdarzeń.$detNote")
+                val shown = list.take(80).joinToString("\n") { "– ${hms.format(java.util.Date(it.optLong("time") * 1000))} ${EVENT_NAMES[it.optString("kind")] ?: it.optString("kind")}" }
+                val more = if (list.size > 80) "\n…i jeszcze ${list.size - 80} późniejszych – zawęź godziny." else ""
+                return ToolOut("Kamera „$cam”, $dayName$range – zdarzenia (${list.size}):\n$shown$more$detNote")
+            }
+            "frame" -> {
+                val sec = daySecond(input.optString("time")) ?: return ToolOut("Zła godzina „${input.optString("time")}” – podaj GG:MM albo GG:MM:SS")
+                val at = day.time / 1000 + sec
+                if (at > System.currentTimeMillis() / 1000 - 120) return ToolOut("Ta chwila jeszcze się nagrywa albo dopiero będzie – do bieżącego obrazu użyj camera_snapshot.")
+                val c = camApi("api/xc/history.mp4", cam, "&time=$at", 70000)
+                val code = c.responseCode
+                if (code != 200) {
+                    val body = runCatching { c.errorStream?.bufferedReader()?.readText().orEmpty() }.getOrDefault("").trim()
+                    return ToolOut(when {
+                        code == 404 && !body.contains("camera", true) && !body.contains("stream", true) -> old
+                        body.contains("no such Xiaomi camera", true) -> "Kamera „$cam” nie jest kamerą Xiaomi z kartą pamięci – nagrań z niej nie da się obejrzeć. Podaj nazwę kamery Xiaomi."
+                        body.contains("no recording", true) -> "Kamera „$cam” nie ma nagrania z tej chwili ($dayName, ${input.optString("time")}) (karta trzyma ok. 12 dni; w nagraniach bywają przerwy)."
+                        else -> "Kamera „$cam” nie dała obrazu z nagrania: ${body.ifEmpty { "HTTP $code" }}. Kamera przyjmuje jedno połączenie naraz – jeśli ktoś ją teraz ogląda gdzie indziej, spróbuj za chwilę."
+                    })
+                }
+                val real = c.getHeaderField("X-Frame-Time")?.toLongOrNull() ?: at
+                val f = java.io.File(act.cacheDir, "history.mp4")
+                c.inputStream.use { inp -> f.outputStream().use { inp.copyTo(it) } }
+                val jpeg = frameJpeg(f) ?: return ToolOut("Radio nie odczytało klatki z nagrania kamery „$cam” (nagranie w rozdzielczości, której dekoder radia nie obsługuje).")
+                return ToolOut("Zdjęcie z nagrania kamery „$cam”: $dayName, godzina ${hms.format(java.util.Date(real * 1000))}.", jpeg)
+            }
+            else -> return ToolOut("Nieznana akcja")
+        }
     }
 
     private fun runText(act: MainActivity, name: String, input: JSONObject): String = when (name) {
@@ -732,7 +874,8 @@ private const val BASE_PROMPT = """Jesteś asystentem w aucie: ekran radia w BMW
 Odpowiadaj po polsku, krótko i naturalnie, zwykle 1–3 zdaniami – odpowiedzi są czytane na głos, więc pisz zwykłym tekstem, bez list, nagłówków, tabel i znaczników Markdown.
 Pisz tak, jak ma to zostać wypowiedziane, bo lektor czyta tekst dosłownie: czas trwania i miejsce w utworze albo filmie słowami („28 minut 38 sekund”, nigdy 28:38), jednostki i skróty w pełnym brzmieniu („kilometrów na godzinę”, „stopni”, „na przykład”, nie km/h, °C, np.), ułamki z przecinkiem i słowem („siedem i pół litra”), bez symboli typu /, ~, →, &. Godziny zegarowe (14:30), daty i zwykłe liczby zapisuj normalnie.
 Kierowca nie powinien czytać długich tekstów w czasie jazdy, dlatego najważniejsze mów na początku.
-Masz narzędzia: car_status (stan auta, położenie, trasa), navigate i open_saved_place (włączają nawigację w Mapach Google), places (szuka miejsc w Google Maps z ocenami i godzinami otwarcia oraz podaje czas dojazdu z korkami – używaj zamiast zgadywania, gdy ktoś pyta o miejsca w pobliżu albo ile się jedzie), open_app (uruchamia aplikację w radiu i może w niej wyszukać), play_youtube (od razu odtwarza w YouTube to, o co ktoś prosi – w tle, bez pokazywania aplikacji, chyba że ktoś chce oglądać), youtube (szukanie w YouTube z wyborem konkretnego filmu, playlisty, kanału albo transmisji; po zalogowaniu konta też playlisty, polubione i subskrypcje właściciela), media_control (pauza, wznowienie, następny, poprzedni, co teraz gra, przewijanie o podany czas lub do podanego miejsca, włączenie wybranego odtwarzacza w tle) i radio_control (głośność, jasność, ekran BMW iDrive, podzielony ekran, ustawienia, wygląd Kokpitu) camera_control (obrót kamery, punkty, zoom), home_ac (klimatyzator w domu: temperatura, wł./wył., ustawienie), home_devices (pozostałe urządzenia domowe ze Smart Life: lista, stan, sterowanie), calendar (kalendarz Google właściciela: terminy, dodawanie, zmiana i usuwanie), slack (Slack właściciela: nieprzeczytane, czytanie, szukanie i wysyłanie – zawsze z potwierdzeniem) i camera_snapshot (aktualne zdjęcie z kamery Xiaomi – gdy ktoś pyta, co widać na kamerze, zawsze zrób nowe zdjęcie). Gdy ktoś prosi o włączenie muzyki lub filmu, użyj play_youtube. Gdy pytanie dotyczy auta, paliwa, miejsca albo trasy, najpierw sprawdź car_status. Gdy ktoś prosi o trasę, od razu włącz nawigację i krótko to potwierdź."""
+Każda wypowiedź rozmówcy zaczyna się od daty i godziny w nawiasie kwadratowym – dopisuje je radio, rozmówca ich nie widzi i nie wpisuje. Z nich wiesz, jaki jest dzień i godzina oraz ile czasu minęło od poprzednich wiadomości (ostatnia mogła być wczoraj albo tydzień temu – wtedy nie zakładaj, że sytuacja jest ta sama). Swoich odpowiedzi nie zaczynaj od daty ani nawiasu.
+Masz narzędzia: car_status (stan auta, położenie, trasa), navigate i open_saved_place (włączają nawigację w Mapach Google), places (szuka miejsc w Google Maps z ocenami i godzinami otwarcia oraz podaje czas dojazdu z korkami – używaj zamiast zgadywania, gdy ktoś pyta o miejsca w pobliżu albo ile się jedzie), open_app (uruchamia aplikację w radiu i może w niej wyszukać), play_youtube (od razu odtwarza w YouTube to, o co ktoś prosi – w tle, bez pokazywania aplikacji, chyba że ktoś chce oglądać), youtube (szukanie w YouTube z wyborem konkretnego filmu, playlisty, kanału albo transmisji; po zalogowaniu konta też playlisty, polubione i subskrypcje właściciela), media_control (pauza, wznowienie, następny, poprzedni, co teraz gra, przewijanie o podany czas lub do podanego miejsca, włączenie wybranego odtwarzacza w tle) i radio_control (głośność, jasność, ekran BMW iDrive, podzielony ekran, ustawienia, wygląd Kokpitu) camera_control (obrót kamery, punkty, zoom), camera_history (co kamera zarejestrowała wcześniej: zdarzenia i zdjęcia z nagrań z podanej godziny), home_ac (klimatyzator w domu: temperatura, wł./wył., ustawienie), home_devices (pozostałe urządzenia domowe ze Smart Life: lista, stan, sterowanie), calendar (kalendarz Google właściciela: terminy, dodawanie, zmiana i usuwanie), slack (Slack właściciela: nieprzeczytane, czytanie, szukanie i wysyłanie – zawsze z potwierdzeniem) i camera_snapshot (aktualne zdjęcie z kamery Xiaomi – gdy ktoś pyta, co widać na kamerze, zawsze zrób nowe zdjęcie). Gdy ktoś prosi o włączenie muzyki lub filmu, użyj play_youtube. Gdy pytanie dotyczy auta, paliwa, miejsca albo trasy, najpierw sprawdź car_status. Gdy ktoś prosi o trasę, od razu włącz nawigację i krótko to potwierdź."""
 
 /** Prompt systemowy: stały opis roli + instrukcje właściciela z Ustawień (jak się zwracać, styl…). */
 private fun systemPrompt(withNotes: Boolean = true): String {
@@ -766,8 +909,9 @@ private fun turns(lines: List<ChatLine>): List<ChatLine> {
         val text = l.text.trim()
         if (text.isEmpty() || (out.isEmpty() && !l.fromUser)) continue
         val last = out.lastOrNull()
-        if (last != null && last.fromUser == l.fromUser) out[out.size - 1] = ChatLine(l.fromUser, last.text + "\n" + text)
-        else out += ChatLine(l.fromUser, text)
+        val stamped = if (l.fromUser && l.time > 0L) stamp(l.time) + text else text
+        if (last != null && last.fromUser == l.fromUser) out[out.size - 1] = ChatLine(l.fromUser, last.text + "\n" + stamped, last.time)
+        else out += ChatLine(l.fromUser, stamped, l.time)
     }
     return out
 }
@@ -796,7 +940,7 @@ private class ClaudeEngine(private val act: MainActivity, apiKey: String, privat
         Tool.builder()
             .name(t.name)
             .description(t.description)
-            .strict(true)
+            .strict(t.strict)
             .inputSchema(
                 Tool.InputSchema.builder()
                     .properties(Tool.InputSchema.Properties.builder().apply {
@@ -899,7 +1043,7 @@ private class OpenAiEngine(private val act: MainActivity, private val apiKey: St
             put(JSONObject().put("type", "function").put("function", JSONObject()
                 .put("name", t.name)
                 .put("description", t.description)
-                .put("strict", true)
+                .put("strict", t.strict)
                 .put("parameters", JSONObject()
                     .put("type", "object")
                     .put("properties", JSONObject(t.props))
@@ -1010,7 +1154,7 @@ object Assistant {
 
     private fun readLines(j: JSONObject): List<ChatLine> {
         val l = j.optJSONArray("lines") ?: JSONArray()
-        return (0 until l.length()).mapNotNull { i -> l.optJSONObject(i)?.let { ChatLine(it.optBoolean("user"), it.optString("text")) } }
+        return (0 until l.length()).mapNotNull { i -> l.optJSONObject(i)?.let { ChatLine(it.optBoolean("user"), it.optString("text"), it.optLong("time", 0L)) } }
     }
 
     private fun show(id: String) {
@@ -1122,7 +1266,7 @@ object Assistant {
 
     private fun save(e: ChatEngine) {
         val f = file ?: return
-        val l = JSONArray().apply { lines.forEach { put(JSONObject().put("user", it.fromUser).put("text", it.text)) } }
+        val l = JSONArray().apply { lines.forEach { put(JSONObject().put("user", it.fromUser).put("text", it.text).put("time", it.time)) } }
         val tag = engineTag(engineKey)
         val history = e.save().toString()
         val t = e.tokens
@@ -1167,7 +1311,9 @@ object Assistant {
             lines += ChatLine(false, "Poprzednia rozmowa osiągnęła limit tokenów – zaczynam nową. Tamta została na liście rozmów, do odczytu.")
         }
         val sid = sessionId
-        lines += ChatLine(true, shown ?: t)
+        val now = System.currentTimeMillis()
+        lines += ChatLine(true, shown ?: t, now)
+        val toModel = stamp(now) + t
         Slack.turn++ // potwierdzenie wysłania wiadomości Slack musi przyjść w nowej wypowiedzi
         busy.value = true
         scope.launch {
@@ -1176,13 +1322,13 @@ object Assistant {
                 withContext(Dispatchers.IO) {
                     val e = engine(act)
                     try {
-                        e.send(t).also { ok = e }
+                        e.send(toModel).also { ok = e }
                     } catch (x: AnthropicServiceException) {
                         // zapisanej rozmowy w pełnej postaci nie da się kontynuować (bloki myślenia z innego kontekstu) – pytanie idzie jeszcze raz z samą treścią rozmowy
                         if (x.statusCode() != 400 || x.message?.contains("thinking") != true) throw x
                         android.util.Log.i("KokpitAssistant", "rozmowa odrzucona (bloki myślenia) – ponawiam z samą treścią rozmowy")
                         val fresh = engine(act, textOnly = true)
-                        fresh.send(t).also { ok = fresh }
+                        fresh.send(toModel).also { ok = fresh }
                     }
                 }
             } catch (e: Exception) {
@@ -1191,7 +1337,7 @@ object Assistant {
             }
             busy.value = false
             if (sid != sessionId) return@launch // w międzyczasie zaczęto albo otwarto inną rozmowę
-            lines += ChatLine(false, reply)
+            lines += ChatLine(false, reply, System.currentTimeMillis())
             ok?.let { tokens.value = it.tokens; save(it) }
             if (Prefs.aiSpeak || speak) act.speak(reply)
             // bez bloku „Asystent” na ekranie (wywołanie przyciskiem głosowym) pokaż odpowiedź w dymku
@@ -1218,7 +1364,7 @@ object Assistant {
         return try {
             val p = Prefs.aiProvider
             val e: ChatEngine = if (p == OPENAI) OpenAiEngine(act, Prefs.openaiKey, Prefs.openaiModel) else ClaudeEngine(act, Prefs.anthropicKey, Prefs.anthropicModel)
-            Look(true, e.send(prompt(shot.text), jpeg))
+            Look(true, e.send(stamp(System.currentTimeMillis()) + prompt(shot.text), jpeg))
         } catch (e: Exception) {
             Look(false, errorText(e))
         }
