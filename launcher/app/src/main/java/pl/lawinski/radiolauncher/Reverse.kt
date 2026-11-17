@@ -173,7 +173,11 @@ private class BmwCamera(private val view: TextureView, private val onStatus: (St
     override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) { if (started) open() }
     override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) = applyTransform()
     override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean { runCatching { device?.close() }; device = null; return true }
-    override fun onSurfaceTextureUpdated(st: SurfaceTexture) { if (tries != -1) { tries = -1; onStatus(null) } }
+    override fun onSurfaceTextureUpdated(st: SurfaceTexture) {
+        st.getTransformMatrix(texTmp)
+        if (!texTmp.contentEquals(tex)) { tex = texTmp.copyOf(); Log.i("KokpitReverse", "macierz obrazu: ${tex.joinToString(" ") { "%.2f".format(it) }}"); applyTransform() }
+        if (tries != -1) { tries = -1; onStatus(null) }
+    }
 
     private fun retry(why: String) {
         Log.w("KokpitReverse", why)
@@ -225,7 +229,16 @@ private class BmwCamera(private val view: TextureView, private val onStatus: (St
         }
     }
 
-    /** Kadr: z obrazu 1280×480 (ekran iDrive) tylko pas kamery; inne rozmiary w całości. */
+    /** macierz obrazu podana przez Androida (obrót / odbicie bufora kamery); domyślnie samo odwrócenie w pionie */
+    private var tex = floatArrayOf(1f, 0f, 0f, 0f, 0f, -1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 1f, 0f, 1f)
+    private val texTmp = FloatArray(16)
+
+    /**
+     * Kadr: z obrazu 1280×480 (ekran iDrive) tylko pas kamery; inne rozmiary w całości.
+     * Wejście obrazu radia zgłasza się jako kamera obrócona o 270°, więc Android obraca podgląd w TextureView.
+     * Zamiast zgadywać obrót, bierzemy macierz SurfaceTexture: punkt widoku (u, v) pokazuje piksel bufora
+     * M·(u, 1−v). Składamy: widok → bufor (odwrócenie tego, co robi Android) → docelowe miejsce kadru.
+     */
     private fun applyTransform() {
         val w = view.width.toFloat(); val h = view.height.toFloat()
         if (w <= 0 || h <= 0) return
@@ -236,10 +249,12 @@ private class BmwCamera(private val view: TextureView, private val onStatus: (St
         val s = if (cover) maxOf(w / rw, h / rh) else minOf(w / rw, h / rh)
         val ox = (w - rw * s) / 2f
         val oy = (h - rh * s) * (if (cover) 0.78f else 0.5f) // przy przycinaniu zostaje dół – najbliżej zderzaka
-        view.setTransform(Matrix().apply {
-            setScale(bw * s / w, bh * s / h)
-            postTranslate(ox - rx * s, oy)
-        })
+        val m = Matrix()
+        m.setScale(1f / w, -1f / h); m.postTranslate(0f, 1f)                 // punkt widoku → (u, 1−v)
+        m.postConcat(Matrix().apply { setValues(floatArrayOf(tex[0], tex[4], tex[12], tex[1], tex[5], tex[13], 0f, 0f, 1f)) }) // → współrzędne bufora 0…1
+        m.postScale(bw.toFloat(), bh.toFloat())                              // → piksel bufora
+        m.postTranslate(-rx, 0f); m.postScale(s, s); m.postTranslate(ox, oy) // → miejsce kadru w widoku
+        view.setTransform(m)
     }
 }
 
