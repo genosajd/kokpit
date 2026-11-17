@@ -140,6 +140,17 @@ private object AssistantTools {
             listOf("action", "value"),
         ),
         Def(
+            "home_devices",
+            "Wszystkie urządzenia domowe z aplikacji Smart Life / Tuya (światła, gniazdka, czujniki, rolety, klimatyzator i inne). list = lista urządzeń. status = stan urządzenia device oraz lista funkcji, które można ustawić, z dozwolonymi wartościami – zrób to przed pierwszym set dla danego urządzenia. set = ustaw funkcję code na value (true / false dla włączników, liczba w zwykłych jednostkach, albo jedna z podanych nazw). Do klimatyzatora wygodniej użyć home_ac. Zanim otworzysz, odblokujesz albo wyłączysz coś związanego z bezpieczeństwem domu (zamek, brama, alarm), potwierdź u rozmówcy.",
+            mapOf(
+                "action" to mapOf("type" to "string", "enum" to listOf("list", "status", "set")),
+                "device" to mapOf("type" to "string", "description" to "Nazwa urządzenia jak na liście; przy list pusty tekst"),
+                "code" to mapOf("type" to "string", "description" to "set: nazwa funkcji ze status, np. switch_1; inaczej pusty tekst"),
+                "value" to mapOf("type" to "string", "description" to "set: wartość; inaczej pusty tekst"),
+            ),
+            listOf("action", "device", "code", "value"),
+        ),
+        Def(
             "phone",
             "Telefon przez Bluetooth radia. call = zadzwoń pod numer albo do kontaktu (pole number: numer telefonu albo imię z kontaktów, np. „Marek”). answer = odbierz połączenie przychodzące. hangup = rozłącz bieżącą rozmowę. status = stan telefonu i rozmowy. Dzwonienie działa tylko, gdy telefon jest połączony z Bluetoothem radia.",
             mapOf(
@@ -275,6 +286,12 @@ private object AssistantTools {
         "slack" -> Slack.run(input)
         "notes" -> Notes.run(input)
         "home_ac" -> homeAc(input.optString("action"), input.optDouble("value", 0.0))
+        "home_devices" -> if (!Tuya.configured) "Dom nie jest połączony (Ustawienia → Dom: klucze Tuya)" else when (input.optString("action")) {
+            "list" -> Tuya.toolList()
+            "status" -> Tuya.toolStatus(input.optString("device"))
+            "set" -> Tuya.toolSet(input.optString("device"), input.optString("code"), input.optString("value"))
+            else -> "Nieznana akcja"
+        }
         "radio_control" -> radioControl(act, input.optString("action"), input.optInt("value"))
         "open_app" -> openApp(act, input.optString("app").trim(), input.optString("search").trim())
         else -> "Nieznane narzędzie $name"
@@ -715,7 +732,7 @@ private const val BASE_PROMPT = """Jesteś asystentem w aucie: ekran radia w BMW
 Odpowiadaj po polsku, krótko i naturalnie, zwykle 1–3 zdaniami – odpowiedzi są czytane na głos, więc pisz zwykłym tekstem, bez list, nagłówków, tabel i znaczników Markdown.
 Pisz tak, jak ma to zostać wypowiedziane, bo lektor czyta tekst dosłownie: czas trwania i miejsce w utworze albo filmie słowami („28 minut 38 sekund”, nigdy 28:38), jednostki i skróty w pełnym brzmieniu („kilometrów na godzinę”, „stopni”, „na przykład”, nie km/h, °C, np.), ułamki z przecinkiem i słowem („siedem i pół litra”), bez symboli typu /, ~, →, &. Godziny zegarowe (14:30), daty i zwykłe liczby zapisuj normalnie.
 Kierowca nie powinien czytać długich tekstów w czasie jazdy, dlatego najważniejsze mów na początku.
-Masz narzędzia: car_status (stan auta, położenie, trasa), navigate i open_saved_place (włączają nawigację w Mapach Google), places (szuka miejsc w Google Maps z ocenami i godzinami otwarcia oraz podaje czas dojazdu z korkami – używaj zamiast zgadywania, gdy ktoś pyta o miejsca w pobliżu albo ile się jedzie), open_app (uruchamia aplikację w radiu i może w niej wyszukać), play_youtube (od razu odtwarza w YouTube to, o co ktoś prosi – w tle, bez pokazywania aplikacji, chyba że ktoś chce oglądać), youtube (szukanie w YouTube z wyborem konkretnego filmu, playlisty, kanału albo transmisji; po zalogowaniu konta też playlisty, polubione i subskrypcje właściciela), media_control (pauza, wznowienie, następny, poprzedni, co teraz gra, przewijanie o podany czas lub do podanego miejsca, włączenie wybranego odtwarzacza w tle) i radio_control (głośność, jasność, ekran BMW iDrive, podzielony ekran, ustawienia, wygląd Kokpitu) camera_control (obrót kamery, punkty, zoom), home_ac (klimatyzator w domu: temperatura, wł./wył., ustawienie), calendar (kalendarz Google właściciela: terminy, dodawanie, zmiana i usuwanie), slack (Slack właściciela: nieprzeczytane, czytanie, szukanie i wysyłanie – zawsze z potwierdzeniem) i camera_snapshot (aktualne zdjęcie z kamery Xiaomi – gdy ktoś pyta, co widać na kamerze, zawsze zrób nowe zdjęcie). Gdy ktoś prosi o włączenie muzyki lub filmu, użyj play_youtube. Gdy pytanie dotyczy auta, paliwa, miejsca albo trasy, najpierw sprawdź car_status. Gdy ktoś prosi o trasę, od razu włącz nawigację i krótko to potwierdź."""
+Masz narzędzia: car_status (stan auta, położenie, trasa), navigate i open_saved_place (włączają nawigację w Mapach Google), places (szuka miejsc w Google Maps z ocenami i godzinami otwarcia oraz podaje czas dojazdu z korkami – używaj zamiast zgadywania, gdy ktoś pyta o miejsca w pobliżu albo ile się jedzie), open_app (uruchamia aplikację w radiu i może w niej wyszukać), play_youtube (od razu odtwarza w YouTube to, o co ktoś prosi – w tle, bez pokazywania aplikacji, chyba że ktoś chce oglądać), youtube (szukanie w YouTube z wyborem konkretnego filmu, playlisty, kanału albo transmisji; po zalogowaniu konta też playlisty, polubione i subskrypcje właściciela), media_control (pauza, wznowienie, następny, poprzedni, co teraz gra, przewijanie o podany czas lub do podanego miejsca, włączenie wybranego odtwarzacza w tle) i radio_control (głośność, jasność, ekran BMW iDrive, podzielony ekran, ustawienia, wygląd Kokpitu) camera_control (obrót kamery, punkty, zoom), home_ac (klimatyzator w domu: temperatura, wł./wył., ustawienie), home_devices (pozostałe urządzenia domowe ze Smart Life: lista, stan, sterowanie), calendar (kalendarz Google właściciela: terminy, dodawanie, zmiana i usuwanie), slack (Slack właściciela: nieprzeczytane, czytanie, szukanie i wysyłanie – zawsze z potwierdzeniem) i camera_snapshot (aktualne zdjęcie z kamery Xiaomi – gdy ktoś pyta, co widać na kamerze, zawsze zrób nowe zdjęcie). Gdy ktoś prosi o włączenie muzyki lub filmu, użyj play_youtube. Gdy pytanie dotyczy auta, paliwa, miejsca albo trasy, najpierw sprawdź car_status. Gdy ktoś prosi o trasę, od razu włącz nawigację i krótko to potwierdź."""
 
 /** Prompt systemowy: stały opis roli + instrukcje właściciela z Ustawień (jak się zwracać, styl…). */
 private fun systemPrompt(withNotes: Boolean = true): String {

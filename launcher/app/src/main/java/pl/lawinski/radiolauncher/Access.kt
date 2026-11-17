@@ -36,7 +36,7 @@ object Access {
         Group("media", "Muzyka i YouTube", "Odtwarzanie, pauza, następny utwór, przewijanie", Icons.Outlined.MusicNote, setOf("play_youtube", "youtube", "media_control")),
         Group("radio", "Radio", "Głośność, jasność, ekran iDrive, wygląd", Icons.Outlined.Radio, setOf("radio_control")),
         Group("camera", "Kamery", "Zdjęcia z kamer Xiaomi, obrót, zoom", Icons.Outlined.Videocam, setOf("camera_snapshot", "camera_control")),
-        Group("home", "Dom (Tuya)", "Klimatyzator i czujnik w domu", Icons.Outlined.AcUnit, setOf("home_ac")),
+        Group("home", "Dom (Tuya)", "Klimatyzator, czujniki i pozostałe urządzenia Smart Life", Icons.Outlined.AcUnit, setOf("home_ac", "home_devices")),
         Group("phone", "Telefon", "Dzwonienie, odbieranie i rozłączanie przez BT radia", Icons.Outlined.Phone, setOf("phone")),
         Group("calendar", "Kalendarz Google", "Odczyt i dodawanie terminów", Icons.Outlined.CalendarMonth, setOf("calendar")),
         Group("slack", "Slack", "Czytanie i wysyłanie wiadomości w Twoim imieniu (z potwierdzeniem)", Icons.Outlined.Chat, setOf("slack")),

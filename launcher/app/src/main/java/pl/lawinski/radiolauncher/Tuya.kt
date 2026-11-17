@@ -108,7 +108,7 @@ object Tuya {
     /** Id klimatyzatora: zapisany albo pierwsze urządzenie kategorii „kt” w projekcie. */
     private fun deviceId(): String {
         Prefs.tuyaDevice.takeIf { it.isNotBlank() }?.let { return it }
-        val list = call("GET", "/v2.0/cloud/thing/device?page_size=20").optJSONArray("result") ?: JSONArray()
+        val list = deviceList()
         val ac = (0 until list.length()).map { list.getJSONObject(it) }.firstOrNull { it.optString("category") == "kt" }
             ?: throw TuyaError(0, "W projekcie Tuya nie ma klimatyzatora")
         Prefs.tuyaDevice = ac.getString("id")
@@ -193,7 +193,7 @@ object Tuya {
 
     private fun findSensors() {
         if (sensorsChecked) return
-        val list = call("GET", "/v2.0/cloud/thing/device?page_size=20").optJSONArray("result") ?: JSONArray()
+        val list = deviceList()
         sensors = (0 until list.length()).map { list.getJSONObject(it) }
             .filter { it.optString("category") in SENSOR_CATEGORIES || it.optString("name").contains("T & H", true) || it.optString("name").contains("T&H", true) }
             .map { it.getString("id") to it.optString("name", it.optString("customName", "Czujnik")) }
@@ -324,6 +324,27 @@ object Tuya {
         else -> a.toString().equals(b.toString(), true)
     }
 
+    /**
+     * Wszystkie urządzenia projektu: API daje najwyżej 20 na stronę, kolejne przez `last_id`.
+     * Pętla kończy się też, gdy serwer zignoruje `last_id` i odda tę samą stronę.
+     */
+    private fun deviceList(): JSONArray {
+        val all = JSONArray()
+        val seen = HashSet<String>()
+        var last = ""
+        for (page in 0 until 10) {
+            val list = call("GET", "/v2.0/cloud/thing/device?page_size=20" + (if (last.isEmpty()) "" else "&last_id=$last")).optJSONArray("result") ?: break
+            var added = 0
+            for (i in 0 until list.length()) {
+                val o = list.getJSONObject(i)
+                if (seen.add(o.optString("id"))) { all.put(o); added++ }
+            }
+            if (list.length() < 20 || added == 0) break
+            last = list.getJSONObject(list.length() - 1).optString("id")
+        }
+        return all
+    }
+
     private fun notConfirmed() = "Urządzenie nie potwierdziło polecenia – sprawdź, czy jest online"
 
     private fun statusMap(id: String): Map<String, Any> {
@@ -357,7 +378,7 @@ object Tuya {
 
     /** Urządzenia z projektu Tuya (do wyboru w bloku). */
     suspend fun devices(): List<Device> = withContext(Dispatchers.IO) {
-        val list = call("GET", "/v2.0/cloud/thing/device?page_size=20").optJSONArray("result") ?: JSONArray()
+        val list = deviceList()
         (0 until list.length()).map { list.getJSONObject(it) }.map {
             // nazwa nadana w Smart Life (np. „Klima salon”), a bez niej nazwa produktu
             val name = it.optString("customName").ifBlank { it.optString("name") }.ifBlank { "Urządzenie" }
@@ -401,6 +422,92 @@ object Tuya {
             describe(e)
         }
     }
+
+    // ---------- wszystkie urządzenia dla asystenta (narzędzie home_devices) ----------
+
+    private fun pow10(n: Int): Double = Math.pow(10.0, n.toDouble())
+
+    private fun num(v: Double): String = if (v == Math.floor(v)) v.toLong().toString() else "%.2f".format(java.util.Locale.US, v).trimEnd('0').trimEnd('.')
+
+    /** wartość odczytu po ludzku: liczby ze skalą i jednostką z opisu urządzenia */
+    private fun human(value: Any, spec: JSONObject?): String {
+        if (value is Number && spec != null && spec.has("scale")) {
+            val v = value.toDouble() / pow10(spec.optInt("scale", 0))
+            return num(v) + spec.optString("unit").let { if (it.isBlank()) "" else " $it" }
+        }
+        return when (value) { true -> "włączone"; false -> "wyłączone"; else -> value.toString() }
+    }
+
+    private fun describeFunction(f: Function): String = when (f.type.lowercase()) {
+        "boolean" -> "${f.code}: true / false"
+        "integer" -> {
+            val k = pow10(f.values.optInt("scale", 0))
+            val unit = f.values.optString("unit").let { if (it.isBlank()) "" else " $it" }
+            "${f.code}: liczba ${num(f.values.optDouble("min", 0.0) / k)}–${num(f.values.optDouble("max", 0.0) / k)}$unit, krok ${num(f.values.optDouble("step", 1.0) / k)}"
+        }
+        "enum" -> "${f.code}: jedno z ${f.values.optJSONArray("range")?.let { a -> (0 until a.length()).joinToString(", ") { a.optString(it) } } ?: "?"}"
+        else -> "${f.code}: ${f.type}"
+    }
+
+    private fun find(name: String): Pair<Device?, String> {
+        val all = kotlinx.coroutines.runBlocking { devices() }
+        val q = name.trim().lowercase()
+        if (q.isEmpty()) return null to "Podaj nazwę urządzenia. Dostępne: ${all.joinToString(", ") { it.name }}"
+        val hit = all.filter { it.name.lowercase() == q }.ifEmpty { all.filter { it.name.lowercase().contains(q) || it.id == name.trim() } }
+        return when (hit.size) {
+            1 -> hit[0] to ""
+            0 -> null to "Nie ma urządzenia „$name”. Dostępne: ${all.joinToString(", ") { it.name }}"
+            else -> null to "Kilka urządzeń pasuje do „$name”: ${hit.joinToString(", ") { it.name }} – podaj pełną nazwę"
+        }
+    }
+
+    /** Lista wszystkich urządzeń z projektu Tuya. */
+    fun toolList(): String = try {
+        val all = kotlinx.coroutines.runBlocking { devices() }
+        if (all.isEmpty()) "W projekcie Tuya nie ma urządzeń"
+        else "Urządzenia w domu (${all.size}):\n" + all.joinToString("\n") { "– ${it.name}" + (if (it.online) "" else " (offline)") }
+    } catch (e: Exception) { describe(e) }
+
+    /** Stan jednego urządzenia i to, czym da się sterować. */
+    fun toolStatus(name: String): String = try {
+        val (dev, err) = find(name)
+        if (dev == null) err else {
+            val st = kotlinx.coroutines.runBlocking { readDevice(dev.id) }
+            buildString {
+                append(dev.name).append(if (dev.online) "" else " (offline)").append("\nStan:\n")
+                st.status.forEach { (code, v) -> append("– ").append(code).append(": ").append(human(v, st.specs[code] ?: st.functions.firstOrNull { it.code == code }?.values)).append("\n") }
+                if (st.functions.isEmpty()) append("Tym urządzeniem nie da się sterować (same odczyty).")
+                else append("Można ustawić (set):\n").append(st.functions.joinToString("\n") { "– " + describeFunction(it) })
+            }
+        }
+    } catch (e: Exception) { describe(e) }
+
+    /** Ustawienie jednej funkcji urządzenia; liczby w zwykłych jednostkach (np. 21.5 °C), przeliczane na skalę urządzenia. */
+    fun toolSet(name: String, code: String, value: String): String = try {
+        val (dev, err) = find(name)
+        if (dev == null) err else {
+            val f = specsOf(dev.id).first.firstOrNull { it.code == code.trim() }
+            if (f == null) "Urządzenie „${dev.name}” nie ma funkcji „$code”. Sprawdź status – tam jest lista funkcji."
+            else {
+                val v = value.trim()
+                val parsed: Any? = when (f.type.lowercase()) {
+                    "boolean" -> when (v.lowercase()) { "true", "on", "1", "tak", "wł", "włącz" -> true; "false", "off", "0", "nie", "wył", "wyłącz" -> false; else -> null }
+                    "integer" -> v.replace(',', '.').toDoubleOrNull()?.let { d ->
+                        val k = pow10(f.values.optInt("scale", 0))
+                        val step = f.values.optInt("step", 1).coerceAtLeast(1)
+                        val raw = Math.round(d * k).toInt().coerceIn(f.values.optInt("min", Int.MIN_VALUE), f.values.optInt("max", Int.MAX_VALUE))
+                        val min = f.values.optInt("min", 0)
+                        min + Math.round((raw - min) / step.toDouble()).toInt() * step
+                    }
+                    "enum" -> v.takeIf { e -> f.values.optJSONArray("range")?.let { a -> (0 until a.length()).any { a.optString(it) == e } } ?: true }
+                    else -> v
+                }
+                if (parsed == null) "Zła wartość „$value”. " + describeFunction(f)
+                else kotlinx.coroutines.runBlocking { command(dev.id, f.code, parsed) }?.let { "Nie udało się: $it" }
+                    ?: "${dev.name}: ${f.code} = ${human(parsed, f.values)}"
+            }
+        }
+    } catch (e: Exception) { describe(e) }
 
     /** Opis błędu do pokazania w bloku. */
     fun errorText(e: Exception) = describe(e)

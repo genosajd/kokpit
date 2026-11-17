@@ -266,6 +266,11 @@ class MainActivity : ComponentActivity() {
                 }.start()
             }
             intent.getStringExtra("cam")?.let { CamProbe.grab(this@MainActivity, it) }
+            // dowolne narzędzie asystenta: --es tool nazwa --es input '{"action":"list",…}'
+            intent.getStringExtra("tool")?.let { name ->
+                val input = runCatching { org.json.JSONObject(intent.getStringExtra("input") ?: "{}") }.getOrDefault(org.json.JSONObject())
+                Thread { Assistant.testTool(this@MainActivity, name, input).lines().forEach { android.util.Log.i("KokpitTest", it) } }.start()
+            }
             intent.getStringExtra("reverse")?.let { v ->
                 // "on" / "off" albo osiem stopni czujników po przecinku (przód L→P, tył L→P; 10 = brak)
                 Reverse.test = true
