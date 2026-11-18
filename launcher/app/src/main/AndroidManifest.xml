@@ -112,6 +112,15 @@
 
         <!-- okno rozmowy nad dowolną aplikacją (przychodzące/wychodzące przez BT radia) -->
         <activity
+            android:name=".PicActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RadioLauncher.Voice"
+            android:taskAffinity="pl.lawinski.radiolauncher.pics"
+            android:launchMode="singleTask"
+            android:excludeFromRecents="true"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|navigation|uiMode|density" />
+        <activity
             android:name=".CallActivity"
             android:exported="false"
             android:theme="@style/Theme.RadioLauncher.Voice"

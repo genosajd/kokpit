@@ -1524,13 +1524,17 @@ private fun ChatLines(
                         if (t.isNotEmpty()) Text(t, color = Dim, fontSize = s(16), maxLines = 1, modifier = Modifier.padding(horizontal = d(6)))
                     }
                     if (l.fromUser) { time(); trash() }
-                    Text(
-                        shown, color = if (l.fromUser) LocalTheme.current.activeText else Txt, fontSize = s(22), lineHeight = s(30),
-                        modifier = Modifier.weight(1f, fill = false)
-                            .then(if (l.fromUser) Modifier.kokpitSurface(d(16), active = true) else Modifier.kokpitSurface(d(16)))
-                            .combinedClickable(onClick = { copyText(act, shown) }, onLongClick = { if (!l.fromUser) act.speak(l.text) })
-                            .padding(horizontal = d(16), vertical = d(10)),
-                    )
+                    Column(Modifier.weight(1f, fill = false)) {
+                        Text(
+                            shown, color = if (l.fromUser) LocalTheme.current.activeText else Txt, fontSize = s(22), lineHeight = s(30),
+                            modifier = Modifier
+                                .then(if (l.fromUser) Modifier.kokpitSurface(d(16), active = true) else Modifier.kokpitSurface(d(16)))
+                                .combinedClickable(onClick = { copyText(act, shown) }, onLongClick = { if (!l.fromUser) act.speak(l.text) })
+                                .padding(horizontal = d(16), vertical = d(10)),
+                        )
+                        // obrazy pokazane przy tej odpowiedzi; dotknięcie otwiera podgląd na cały ekran
+                        PicThumbs(act, l.pics, d(if (onDelete != null) 170 else 120), Modifier.padding(top = d(8)))
+                    }
                     if (!l.fromUser) { trash(); time() }
                 }
             }

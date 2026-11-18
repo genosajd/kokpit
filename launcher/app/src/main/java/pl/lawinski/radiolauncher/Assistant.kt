@@ -40,7 +40,8 @@ import java.util.Locale
 
 /** Jedna wypowiedź w rozmowie widoczna w bloku. */
 /** [time] – kiedy powstała (ms); 0 = nieznany (rozmowy zapisane przed wersją 0.3.34). */
-data class ChatLine(val fromUser: Boolean, val text: String, val time: Long = System.currentTimeMillis())
+/** [pics] – obrazy pokazane przy tej odpowiedzi (miniatury pod tekstem). */
+data class ChatLine(val fromUser: Boolean, val text: String, val time: Long = System.currentTimeMillis(), val pics: List<Pic> = emptyList())
 
 /** Data i godzina dopisywane do wypowiedzi rozmówcy dla modelu, np. „[wtorek 17 listopada 2026, 10:52]”. */
 internal fun stamp(time: Long): String =
@@ -158,6 +159,19 @@ private object AssistantTools {
             strict = false,
         ),
         Def(
+            "show_image",
+            "Pokazuje rozmówcy obrazy na ekranie radia. Źródła (source): wikipedia = zdjęcia do hasła z Wikipedii i Wikimedia Commons (query = krótkie hasło jak tytuł artykułu, np. „BMW serii 5” albo „Zamek w Malborku”; gdy mało wyników, spróbuj po angielsku; count 1–6); place = zdjęcia miejsca z Google Maps (query = nazwa z miejscowością; każde zdjęcie jest płatne, więc count najwyżej 3); url = obraz spod adresu http (query = adres albo kilka oddzielonych spacją, caption = podpis; miniatura filmu YouTube to https://i.ytimg.com/vi/ID_FILMU/hqdefault.jpg); collected = obrazy już zebrane w tej odpowiedzi, np. zdjęcia z kamery. Zdjęcia z kamer (camera_snapshot, camera_history) rozmówca i tak dostaje jako miniatury pod Twoją odpowiedzią – nie musisz ich pokazywać osobno. fullscreen = true otwiera obrazy od razu na całym ekranie i zasłania nawigację, więc tylko gdy rozmówca wyraźnie prosi „pokaż”; inaczej false (same miniatury). Żeby pokazać zdjęcie z kamery na całym ekranie: najpierw camera_snapshot albo camera_history, potem show_image source=collected fullscreen=true. Obrazów z tego narzędzia sam nie widzisz.",
+            mapOf(
+                "source" to mapOf("type" to "string", "enum" to listOf("wikipedia", "place", "url", "collected")),
+                "query" to mapOf("type" to "string", "description" to "Hasło, nazwa miejsca albo adres obrazu; przy collected pusty tekst"),
+                "count" to mapOf("type" to "number", "description" to "Ile obrazów (wikipedia, place), 1–6; domyślnie 3"),
+                "caption" to mapOf("type" to "string", "description" to "url: podpis obrazu; inaczej pusty tekst"),
+                "fullscreen" to mapOf("type" to "boolean", "description" to "true tylko na wyraźne „pokaż”"),
+            ),
+            listOf("source", "query", "fullscreen"),
+            strict = false,
+        ),
+        Def(
             "camera_control",
             "Steruje kamerą Xiaomi z obrotem: list = kamery i co umieją, move = obrót w kierunku direction przez amount sekund (0.1–4; ok. 1 s to niewielki obrót), points = zapisane punkty 1–3, goto = obrót do punktu nr amount, zoom = przybliżenie amount (1–9). Po obrocie zrób camera_snapshot, żeby zobaczyć efekt. Pusta nazwa kamery = kamera z bloku Kamera.",
             mapOf(
@@ -264,9 +278,20 @@ private object AssistantTools {
 
     fun run(act: MainActivity, name: String, input: JSONObject): ToolOut =
         if (!Access.allows(name)) ToolOut("Właściciel wyłączył ten dostęp w Ustawieniach Kokpitu → Asystent AI → Dostępy.")
-        else if (name == "camera_snapshot") snapshot(act, input.optString("camera").trim())
-        else if (name == "camera_history") cameraHistory(act, input)
+        else if (name == "camera_snapshot") snapshot(act, input.optString("camera").trim()).also(::keepPicture)
+        else if (name == "camera_history") cameraHistory(act, input).also(::keepPicture)
+        else if (name == "show_image") ToolOut(Pics.run(act, input))
         else ToolOut(runText(act, name, input))
+
+    /** Zdjęcie, które asystent dostał z kamery, rozmówca zobaczy jako miniaturę pod odpowiedzią. */
+    private fun keepPicture(out: ToolOut) {
+        val jpeg = out.jpeg ?: return
+        if (Access.allows("show_image")) Pics.addJpeg(
+            android.util.Base64.decode(jpeg, android.util.Base64.NO_WRAP),
+            out.text.removeSuffix(".").replace("Zdjęcie z nagrania kamery ", "Kamera ").replace("Zdjęcie z kamery ", "Kamera ")
+                .replace(" zrobione o ", ", ").replace("”: ", "”, nagranie: "),
+        )
+    }
 
     /** Kamera o podanej nazwie (pusta = kamera z bloku); drugi element = komunikat, gdy się nie udało. */
     private fun pickCamera(act: MainActivity, wanted: String): Pair<String?, String> {
@@ -875,7 +900,7 @@ Odpowiadaj po polsku, krótko i naturalnie, zwykle 1–3 zdaniami – odpowiedzi
 Pisz tak, jak ma to zostać wypowiedziane, bo lektor czyta tekst dosłownie: czas trwania i miejsce w utworze albo filmie słowami („28 minut 38 sekund”, nigdy 28:38), jednostki i skróty w pełnym brzmieniu („kilometrów na godzinę”, „stopni”, „na przykład”, nie km/h, °C, np.), ułamki z przecinkiem i słowem („siedem i pół litra”), bez symboli typu /, ~, →, &. Godziny zegarowe (14:30), daty i zwykłe liczby zapisuj normalnie.
 Kierowca nie powinien czytać długich tekstów w czasie jazdy, dlatego najważniejsze mów na początku.
 Każda wypowiedź rozmówcy zaczyna się od daty i godziny w nawiasie kwadratowym – dopisuje je radio, rozmówca ich nie widzi i nie wpisuje. Z nich wiesz, jaki jest dzień i godzina oraz ile czasu minęło od poprzednich wiadomości (ostatnia mogła być wczoraj albo tydzień temu – wtedy nie zakładaj, że sytuacja jest ta sama). Swoich odpowiedzi nie zaczynaj od daty ani nawiasu.
-Masz narzędzia: car_status (stan auta, położenie, trasa), navigate i open_saved_place (włączają nawigację w Mapach Google), places (szuka miejsc w Google Maps z ocenami i godzinami otwarcia oraz podaje czas dojazdu z korkami – używaj zamiast zgadywania, gdy ktoś pyta o miejsca w pobliżu albo ile się jedzie), open_app (uruchamia aplikację w radiu i może w niej wyszukać), play_youtube (od razu odtwarza w YouTube to, o co ktoś prosi – w tle, bez pokazywania aplikacji, chyba że ktoś chce oglądać), youtube (szukanie w YouTube z wyborem konkretnego filmu, playlisty, kanału albo transmisji; po zalogowaniu konta też playlisty, polubione i subskrypcje właściciela), media_control (pauza, wznowienie, następny, poprzedni, co teraz gra, przewijanie o podany czas lub do podanego miejsca, włączenie wybranego odtwarzacza w tle) i radio_control (głośność, jasność, ekran BMW iDrive, podzielony ekran, ustawienia, wygląd Kokpitu) camera_control (obrót kamery, punkty, zoom), camera_history (co kamera zarejestrowała wcześniej: zdarzenia i zdjęcia z nagrań z podanej godziny), home_ac (klimatyzator w domu: temperatura, wł./wył., ustawienie), home_devices (pozostałe urządzenia domowe ze Smart Life: lista, stan, sterowanie), calendar (kalendarz Google właściciela: terminy, dodawanie, zmiana i usuwanie), slack (Slack właściciela: nieprzeczytane, czytanie, szukanie i wysyłanie – zawsze z potwierdzeniem) i camera_snapshot (aktualne zdjęcie z kamery Xiaomi – gdy ktoś pyta, co widać na kamerze, zawsze zrób nowe zdjęcie). Gdy ktoś prosi o włączenie muzyki lub filmu, użyj play_youtube. Gdy pytanie dotyczy auta, paliwa, miejsca albo trasy, najpierw sprawdź car_status. Gdy ktoś prosi o trasę, od razu włącz nawigację i krótko to potwierdź."""
+Masz narzędzia: car_status (stan auta, położenie, trasa), navigate i open_saved_place (włączają nawigację w Mapach Google), places (szuka miejsc w Google Maps z ocenami i godzinami otwarcia oraz podaje czas dojazdu z korkami – używaj zamiast zgadywania, gdy ktoś pyta o miejsca w pobliżu albo ile się jedzie), open_app (uruchamia aplikację w radiu i może w niej wyszukać), play_youtube (od razu odtwarza w YouTube to, o co ktoś prosi – w tle, bez pokazywania aplikacji, chyba że ktoś chce oglądać), youtube (szukanie w YouTube z wyborem konkretnego filmu, playlisty, kanału albo transmisji; po zalogowaniu konta też playlisty, polubione i subskrypcje właściciela), media_control (pauza, wznowienie, następny, poprzedni, co teraz gra, przewijanie o podany czas lub do podanego miejsca, włączenie wybranego odtwarzacza w tle) i radio_control (głośność, jasność, ekran BMW iDrive, podzielony ekran, ustawienia, wygląd Kokpitu) camera_control (obrót kamery, punkty, zoom), camera_history (co kamera zarejestrowała wcześniej: zdarzenia i zdjęcia z nagrań z podanej godziny), show_image (pokazuje rozmówcy obrazy na ekranie: zdjęcia z Wikipedii, zdjęcia miejsca z Google Maps, obraz spod adresu, zdjęcia z kamer na całym ekranie – używaj, gdy ktoś prosi „pokaż”), home_ac (klimatyzator w domu: temperatura, wł./wył., ustawienie), home_devices (pozostałe urządzenia domowe ze Smart Life: lista, stan, sterowanie), calendar (kalendarz Google właściciela: terminy, dodawanie, zmiana i usuwanie), slack (Slack właściciela: nieprzeczytane, czytanie, szukanie i wysyłanie – zawsze z potwierdzeniem) i camera_snapshot (aktualne zdjęcie z kamery Xiaomi – gdy ktoś pyta, co widać na kamerze, zawsze zrób nowe zdjęcie). Gdy ktoś prosi o włączenie muzyki lub filmu, użyj play_youtube. Gdy pytanie dotyczy auta, paliwa, miejsca albo trasy, najpierw sprawdź car_status. Gdy ktoś prosi o trasę, od razu włącz nawigację i krótko to potwierdź."""
 
 /** Prompt systemowy: stały opis roli + instrukcje właściciela z Ustawień (jak się zwracać, styl…). */
 private fun systemPrompt(withNotes: Boolean = true): String {
@@ -905,11 +930,17 @@ private interface ChatEngine {
 /** Treść rozmowy jako naprzemienne wypowiedzi, zaczynając od rozmówcy (sąsiednie tej samej strony sklejone). */
 private fun turns(lines: List<ChatLine>): List<ChatLine> {
     val out = mutableListOf<ChatLine>()
+    var seen = "" // zdjęcia oglądane przy poprzedniej odpowiedzi – w samej treści ich nie ma, więc model dostaje o nich wzmiankę
     for (l in lines) {
         val text = l.text.trim()
         if (text.isEmpty() || (out.isEmpty() && !l.fromUser)) continue
         val last = out.lastOrNull()
-        val stamped = if (l.fromUser && l.time > 0L) stamp(l.time) + text else text
+        var stamped = if (l.fromUser && l.time > 0L) stamp(l.time) + text else text
+        if (l.fromUser && seen.isNotEmpty()) {
+            stamped = "(Radio: przy poprzedniej odpowiedzi miałeś przed sobą obrazy – $seen. Nie ma ich już w tej rozmowie; tamten opis był na ich podstawie.)\n$stamped"
+            seen = ""
+        }
+        if (!l.fromUser && l.pics.isNotEmpty()) seen = l.pics.joinToString("; ") { it.caption.ifEmpty { "obraz" } }
         if (last != null && last.fromUser == l.fromUser) out[out.size - 1] = ChatLine(l.fromUser, last.text + "\n" + stamped, last.time)
         else out += ChatLine(l.fromUser, stamped, l.time)
     }
@@ -1146,6 +1177,9 @@ object Assistant {
     private const val KEEP = 30
     private var dir: java.io.File? = null
     private var sessionId = ""
+
+    /** numer bieżącej rozmowy (katalog obrazów tej rozmowy) */
+    val session get() = sessionId
     private val file get() = dir?.let { java.io.File(it, "$sessionId.json") }
     private val io = java.util.concurrent.Executors.newSingleThreadExecutor()
 
@@ -1154,7 +1188,7 @@ object Assistant {
 
     private fun readLines(j: JSONObject): List<ChatLine> {
         val l = j.optJSONArray("lines") ?: JSONArray()
-        return (0 until l.length()).mapNotNull { i -> l.optJSONObject(i)?.let { ChatLine(it.optBoolean("user"), it.optString("text"), it.optLong("time", 0L)) } }
+        return (0 until l.length()).mapNotNull { i -> l.optJSONObject(i)?.let { ChatLine(it.optBoolean("user"), it.optString("text"), it.optLong("time", 0L), Pics.fromJson(it.optJSONArray("pics"))) } }
     }
 
     private fun show(id: String) {
@@ -1211,6 +1245,7 @@ object Assistant {
     fun delete(id: String) {
         if (id == sessionId && busy.value) return
         runCatching { java.io.File(dir, "$id.json").delete() }
+        Pics.deleteSession(id)
         if (id == sessionId) reset() else sessionTick.intValue++
     }
 
@@ -1253,7 +1288,7 @@ object Assistant {
      */
     fun deleteLine(act: MainActivity, index: Int) {
         if (busy.value || index !in lines.indices) return
-        lines.removeAt(index)
+        Pics.delete(lines.removeAt(index).pics)
         val rest = lines.toList()
         scope.launch(Dispatchers.IO) {
             runCatching {
@@ -1266,7 +1301,7 @@ object Assistant {
 
     private fun save(e: ChatEngine) {
         val f = file ?: return
-        val l = JSONArray().apply { lines.forEach { put(JSONObject().put("user", it.fromUser).put("text", it.text).put("time", it.time)) } }
+        val l = JSONArray().apply { lines.forEach { l -> put(JSONObject().put("user", l.fromUser).put("text", l.text).put("time", l.time).apply { if (l.pics.isNotEmpty()) put("pics", Pics.toJson(l.pics)) }) } }
         val tag = engineTag(engineKey)
         val history = e.save().toString()
         val t = e.tokens
@@ -1279,7 +1314,7 @@ object Assistant {
                 tmp.renameTo(f)
                 // zostaje KEEP najnowszych rozmów
                 f.parentFile?.listFiles { x -> x.name.endsWith(".json") }.orEmpty().sortedByDescending { it.lastModified() }
-                    .drop(KEEP).forEach { if (it.name != "$keep.json") it.delete() }
+                    .drop(KEEP).forEach { if (it.name != "$keep.json") { it.delete(); Pics.deleteSession(it.name.removeSuffix(".json")) } }
             }
             sessionTick.intValue++
         }
@@ -1314,6 +1349,7 @@ object Assistant {
         val now = System.currentTimeMillis()
         lines += ChatLine(true, shown ?: t, now)
         val toModel = stamp(now) + t
+        Pics.begin()
         Slack.turn++ // potwierdzenie wysłania wiadomości Slack musi przyjść w nowej wypowiedzi
         busy.value = true
         scope.launch {
@@ -1337,7 +1373,7 @@ object Assistant {
             }
             busy.value = false
             if (sid != sessionId) return@launch // w międzyczasie zaczęto albo otwarto inną rozmowę
-            lines += ChatLine(false, reply, System.currentTimeMillis())
+            lines += ChatLine(false, reply, System.currentTimeMillis(), Pics.take())
             ok?.let { tokens.value = it.tokens; save(it) }
             if (Prefs.aiSpeak || speak) act.speak(reply)
             // bez bloku „Asystent” na ekranie (wywołanie przyciskiem głosowym) pokaż odpowiedź w dymku

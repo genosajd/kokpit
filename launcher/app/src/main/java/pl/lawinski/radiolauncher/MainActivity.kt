@@ -296,6 +296,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         Prefs.init(this)
         Notes.init()
+        Pics.init(this)
         Assistant.init(this)
         live = this
         widgetManager = AppWidgetManager.getInstance(this)

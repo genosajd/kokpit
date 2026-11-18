@@ -65,6 +65,31 @@ object Places {
         }
     }
 
+    /**
+     * Zdjęcia miejsca z Google Maps (pierwszy wynik wyszukiwania): adresy plików i podpisy z autorem.
+     * Każde zdjęcie to osobno liczone zapytanie Place Photo.
+     */
+    fun photos(act: MainActivity, query: String, count: Int): List<Pair<String, String>> {
+        if (!configured) throw GoogleError("brak klucza Google Maps (Ustawienia → Nawigacja)")
+        val body = JSONObject().put("textQuery", query).put("languageCode", "pl").put("regionCode", "PL").put("maxResultCount", 1)
+        act.location.location.value?.let { body.put("locationBias", JSONObject().put("circle", JSONObject().put("center", latLng(it)).put("radius", 30000.0))) }
+        val place = post("https://places.googleapis.com/v1/places:searchText", "places.displayName,places.photos", body)
+            .optJSONArray("places")?.optJSONObject(0) ?: return emptyList()
+        val name = place.optJSONObject("displayName")?.optString("text").orEmpty()
+        val list = place.optJSONArray("photos") ?: return emptyList()
+        return (0 until minOf(list.length(), count)).mapNotNull { i ->
+            val p = list.getJSONObject(i)
+            val c = URL("https://places.googleapis.com/v1/${p.getString("name")}/media?maxWidthPx=1600&skipHttpRedirect=true").openConnection() as HttpURLConnection
+            c.connectTimeout = 10000
+            c.readTimeout = 15000
+            c.setRequestProperty("X-Goog-Api-Key", Prefs.googleKey)
+            if (c.responseCode != 200) return@mapNotNull null
+            val uri = JSONObject(c.inputStream.bufferedReader().use { it.readText() }).optString("photoUri")
+            val author = p.optJSONArray("authorAttributions")?.optJSONObject(0)?.optString("displayName").orEmpty()
+            if (uri.isEmpty()) null else uri to (name + (if (author.isEmpty()) "" else " · fot. $author") + " · Google Maps")
+        }
+    }
+
     private fun search(act: MainActivity, input: JSONObject): String {
         val query = input.optString("query").trim()
         if (query.isEmpty()) return "Brak zapytania"

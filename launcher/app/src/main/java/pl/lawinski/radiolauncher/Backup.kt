@@ -113,6 +113,7 @@ object Backup {
         Prefs.store.edit().clear().commit()
         runCatching { java.io.File(act.filesDir, "assistant_chat.json").delete() }
         runCatching { java.io.File(act.filesDir, "assistant_chats").deleteRecursively() }
+        runCatching { java.io.File(act.filesDir, "assistant_pics").deleteRecursively() }
         runCatching { java.io.File(act.filesDir, "assistant_chat.json.tmp").delete() }
         CarPhoto.clear(act)
         runCatching { act.cacheDir.listFiles()?.forEach { it.deleteRecursively() } }

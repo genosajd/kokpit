@@ -402,12 +402,17 @@ class VoiceActivity : ComponentActivity() {
                         Spacer(Modifier.width(14.dp))
                         Text("Myślę…", color = Txt, fontSize = 22.sp)
                     }
-                    Phase.ANSWER, Phase.ERROR -> Text(
-                        Speech.plain(a), // znaczniki emocji są tylko dla głosu
-                        color = if (p == Phase.ERROR) Warn else Txt,
-                        fontSize = 22.sp, lineHeight = 30.sp,
-                        modifier = Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState()),
-                    )
+                    Phase.ANSWER, Phase.ERROR -> {
+                        Text(
+                            Speech.plain(a), // znaczniki emocji są tylko dla głosu
+                            color = if (p == Phase.ERROR) Warn else Txt,
+                            fontSize = 22.sp, lineHeight = 30.sp,
+                            modifier = Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState()),
+                        )
+                        // obrazy pokazane przy tej odpowiedzi
+                        val pics = if (p == Phase.ANSWER) Assistant.lines.lastOrNull()?.takeIf { !it.fromUser }?.pics.orEmpty() else emptyList()
+                        PicThumbs(this@VoiceActivity, pics, 110.dp, Modifier.padding(top = 12.dp))
+                    }
                 }
                 Spacer(Modifier.size(16.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {

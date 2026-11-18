@@ -7,6 +7,7 @@ import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.DirectionsCar
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.Navigation
@@ -41,6 +42,7 @@ object Access {
         Group("calendar", "Kalendarz Google", "Odczyt i dodawanie terminów", Icons.Outlined.CalendarMonth, setOf("calendar")),
         Group("slack", "Slack", "Czytanie i wysyłanie wiadomości w Twoim imieniu (z potwierdzeniem)", Icons.Outlined.Chat, setOf("slack")),
         Group("notes", "Notes", "Zapamiętywanie rzeczy na Twoją prośbę – między rozmowami", Icons.Outlined.EditNote, setOf("notes")),
+        Group("show", "Obrazy na ekranie", "Pokazywanie zdjęć: z kamer, Wikipedii, miejsc Google, spod adresu", Icons.Outlined.Image, setOf("show_image")),
         Group("web", "Internet", "Wyszukiwanie w sieci (tylko Claude)", Icons.Outlined.Language, setOf(WEB)),
     )
 
