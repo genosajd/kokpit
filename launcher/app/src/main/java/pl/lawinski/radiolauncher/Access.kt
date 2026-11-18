@@ -7,6 +7,7 @@ import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.DirectionsCar
+import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.MusicNote
@@ -43,6 +44,7 @@ object Access {
         Group("slack", "Slack", "Czytanie i wysyłanie wiadomości w Twoim imieniu (z potwierdzeniem)", Icons.Outlined.Chat, setOf("slack")),
         Group("notes", "Notes", "Zapamiętywanie rzeczy na Twoją prośbę – między rozmowami", Icons.Outlined.EditNote, setOf("notes")),
         Group("show", "Obrazy na ekranie", "Pokazywanie zdjęć: z kamer, Wikipedii, miejsc Google, spod adresu", Icons.Outlined.Image, setOf("show_image")),
+        Group("mcp", "Serwery MCP", "Narzędzia z serwerów dodanych niżej, np. położenia bliskich", Icons.Outlined.Hub, emptySet()),
         Group("web", "Internet", "Wyszukiwanie w sieci (tylko Claude)", Icons.Outlined.Language, setOf(WEB)),
     )
 
@@ -64,6 +66,7 @@ object Access {
 
     /** Czy asystent może użyć narzędzia [tool]. */
     fun allows(tool: String): Boolean {
+        if (tool.startsWith("mcp_")) return enabled("mcp")
         val g = groups.firstOrNull { tool in it.tools } ?: return true
         return available(g.id) && enabled(g.id)
     }

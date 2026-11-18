@@ -2,6 +2,7 @@
 
 package pl.lawinski.radiolauncher
 
+import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.StickyNote2
 import android.content.Intent
@@ -203,6 +204,7 @@ fun SettingsDialog(
     onCustom: (CustomField) -> Unit,
     onInstructions: () -> Unit,
     onNotes: () -> Unit,
+    onMcp: () -> Unit,
     onDemo: (Boolean) -> Unit,
     onResetShortcuts: () -> Unit,
 ) {
@@ -282,7 +284,7 @@ fun SettingsDialog(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("Kokpit F11 0.3.35", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
+                Text("Kokpit F11 0.3.36", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
             }
             Spacer(Modifier.width(d(26)))
             LazyVerticalGrid(
@@ -749,6 +751,12 @@ fun SettingsDialog(
                 item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                     Text("Dostępy asystenta – dotknij, aby zablokować albo odblokować", color = Dim, fontSize = s(20),
                         modifier = Modifier.padding(top = d(14), bottom = d(4)))
+                }
+                item {
+                    val mcpVersion by Mcp.version
+                    val n = remember(mcpVersion) { Mcp.servers().size }
+                    SettingTile(Icons.Outlined.Hub, "Serwery MCP: " + if (n == 0) "brak" else "$n",
+                        if (n == 0) "Dodatkowe narzędzia dla asystenta z własnego serwera (adres i klucz)" else "Narzędzi: ${remember(mcpVersion) { Mcp.tools().size }}. Dotknij, aby dodać, usunąć albo sprawdzić połączenie") { onMcp() }
                 }
                 Access.visible.forEach { g ->
                     item {

@@ -290,6 +290,21 @@ object Prefs {
         set(v) = sp.edit().putInt("settings_ai_tab", v).apply()
 
     /** notes asystenta (Notes.kt), tablica JSON */
+    /** serwery MCP asystenta: [{name,url,token}] (z kluczami – tylko w eksporcie „z kluczami”) */
+    var mcpServers: String
+        get() = sp.getString("mcp_servers", "[]") ?: "[]"
+        set(v) = sp.edit().putString("mcp_servers", v).apply()
+
+    /** zapamiętane listy narzędzi serwerów MCP */
+    var mcpTools: String
+        get() = sp.getString("mcp_tools", "[]") ?: "[]"
+        set(v) = sp.edit().putString("mcp_tools", v).apply()
+
+    /** wskazówki serwerów MCP (instructions) do opisu roli asystenta */
+    var mcpNotes: String
+        get() = sp.getString("mcp_notes", "{}") ?: "{}"
+        set(v) = sp.edit().putString("mcp_notes", v).apply()
+
     var aiNotes: String
         get() = sp.getString("ai_notes", "[]") ?: "[]"
         set(v) = sp.edit().putString("ai_notes", v).apply()

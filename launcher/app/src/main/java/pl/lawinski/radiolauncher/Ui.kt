@@ -187,6 +187,7 @@ sealed interface Dlg {
     data class Custom(val field: CustomField) : Dlg
     data object Instructions : Dlg
     data object Notes : Dlg
+    data object McpServers : Dlg
     data object Cameras : Dlg
     /** okno telefonu; search = od razu wyszukiwarka kontaktów */
     data class Phone(val search: Boolean = false) : Dlg
@@ -332,6 +333,7 @@ fun LauncherScreen(act: MainActivity) {
                         onCustom = { dialog = Dlg.Custom(it) },
                         onInstructions = { dialog = Dlg.Instructions },
                         onNotes = { dialog = Dlg.Notes },
+                        onMcp = { dialog = Dlg.McpServers },
                         onCameras = { dialog = Dlg.Cameras },
                         onEditLayout = { dialog = null; edit = true },
                         onDemo = { demo = it },
@@ -359,6 +361,7 @@ fun LauncherScreen(act: MainActivity) {
                     is Dlg.Custom -> CustomizeDialog(dl.field, onClose = { dialog = Dlg.Settings })
                     is Dlg.Instructions -> InstructionsDialog(onClose = { dialog = Dlg.Settings })
                     is Dlg.Notes -> NotesDialog(onClose = { dialog = Dlg.Settings })
+                    is Dlg.McpServers -> McpDialog(onClose = { dialog = Dlg.Settings })
                     is Dlg.Cameras -> CameraPickerDialog(act, onClose = { dialog = null })
                     is Dlg.Phone -> PhoneDialog(act, dl.search, onClose = { dialog = null })
                     is Dlg.TuyaDevices -> TuyaDevicePickerDialog(act, dl.n, onClose = { dialog = null })

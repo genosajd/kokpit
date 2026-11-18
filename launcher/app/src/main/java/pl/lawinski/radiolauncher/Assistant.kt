@@ -73,7 +73,17 @@ private object AssistantTools {
      */
     class Def(val name: String, val description: String, val props: Map<String, Map<String, Any>>, val required: List<String>, val strict: Boolean = true)
 
-    val all = listOf(
+    /** narzędzia Kokpitu i narzędzia serwerów MCP dodanych przez właściciela */
+    val all: List<Def>
+        get() = builtin + Mcp.tools().map { t ->
+            @Suppress("UNCHECKED_CAST")
+            val props = (Mcp.plain(t.schema.optJSONObject("properties") ?: JSONObject()) as Map<String, Any?>)
+                .mapValues { (_, v) -> (v as? Map<String, Any>) ?: mapOf("type" to "string") }
+            val required = t.schema.optJSONArray("required")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+            Def(t.def, "[serwer ${t.server}] ${t.description}", props, required, strict = false)
+        }
+
+    private val builtin = listOf(
         Def(
             "car_status",
             "Bieżący stan auta i otoczenia: paliwo, zasięg, temperatura zewnętrzna, bieg, prędkość, otwarte drzwi, położenie GPS, trwająca trasa w nawigacji. Użyj przy każdym pytaniu o auto, paliwo, pogodę za oknem albo o to, gdzie jesteśmy.",
@@ -281,6 +291,7 @@ private object AssistantTools {
         else if (name == "camera_snapshot") snapshot(act, input.optString("camera").trim()).also(::keepPicture)
         else if (name == "camera_history") cameraHistory(act, input).also(::keepPicture)
         else if (name == "show_image") ToolOut(Pics.run(act, input))
+        else if (name.startsWith("mcp_")) ToolOut(Mcp.call(name, input))
         else ToolOut(runText(act, name, input))
 
     /** Zdjęcie, które asystent dostał z kamery, rozmówca zobaczy jako miniaturę pod odpowiedzią. */
@@ -905,7 +916,7 @@ Masz narzędzia: car_status (stan auta, położenie, trasa), navigate i open_sav
 /** Prompt systemowy: stały opis roli + instrukcje właściciela z Ustawień (jak się zwracać, styl…). */
 private fun systemPrompt(withNotes: Boolean = true): String {
     val own = Prefs.aiInstructions.trim()
-    val base = BASE_PROMPT + Access.promptNote() + Speech.tagNote()
+    val base = BASE_PROMPT + Mcp.promptNote() + Access.promptNote() + Speech.tagNote()
     val notes = if (withNotes) Notes.prompt() else ""
     return (if (own.isEmpty()) base
     else "$base\n\nInstrukcje od właściciela auta (stosuj je zawsze, chyba że przeczą bezpieczeństwu w czasie jazdy):\n$own") + notes

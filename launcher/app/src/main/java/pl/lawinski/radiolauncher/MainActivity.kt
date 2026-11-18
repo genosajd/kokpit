@@ -266,6 +266,15 @@ class MainActivity : ComponentActivity() {
                 }.start()
             }
             intent.getStringExtra("cam")?.let { CamProbe.grab(this@MainActivity, it) }
+            // serwer MCP bez przepisywania klucza na ekranie: --es mcp '{"name":"…","url":"https://…/mcp","token":"…"}'
+            intent.getStringExtra("mcp")?.let { v ->
+                Thread {
+                    val o = runCatching { org.json.JSONObject(v) }.getOrDefault(org.json.JSONObject())
+                    val problem = Mcp.add(o.optString("name"), o.optString("url"), o.optString("token"))
+                    if (problem != null) android.util.Log.i("KokpitTest", "mcp: $problem")
+                    else Mcp.refresh().forEach { (name, status) -> android.util.Log.i("KokpitTest", "mcp $name: $status") }
+                }.start()
+            }
             // dowolne narzędzie asystenta: --es tool nazwa --es input '{"action":"list",…}'
             intent.getStringExtra("tool")?.let { name ->
                 val input = runCatching { org.json.JSONObject(intent.getStringExtra("input") ?: "{}") }.getOrDefault(org.json.JSONObject())
@@ -297,6 +306,8 @@ class MainActivity : ComponentActivity() {
         Prefs.init(this)
         Notes.init()
         Pics.init(this)
+        // listy narzędzi serwerów MCP odświeżane w tle (asystent ma od razu zapamiętane)
+        Thread { runCatching { if (Mcp.servers().isNotEmpty()) Mcp.refresh() } }.start()
         Assistant.init(this)
         live = this
         widgetManager = AppWidgetManager.getInstance(this)
