@@ -84,7 +84,7 @@ import kotlin.concurrent.thread
 
 private val Green = Brush.linearGradient(listOf(Color(0xFF35C467), Color(0xFF178A41)))
 private val Red = Brush.linearGradient(listOf(Color(0xFFF0555A), Color(0xFFB81F29)))
-private val Off = Brush.linearGradient(listOf(Color(0xFF3A4350), Color(0xFF2A313B)))
+private val Off: Brush get() = if (themeState.value.gloss) Brush.linearGradient(listOf(Color(0xFF3A342A), Color(0xFF29241C))) else Brush.linearGradient(listOf(Color(0xFF3A4350), Color(0xFF2A313B)))
 private val GreenTxt = Color(0xFF5FE08A)
 private val Missed = Color(0xFFFF8A90)
 
@@ -168,7 +168,7 @@ private fun CallBtn(modifier: Modifier, desc: String, text: String? = null, red:
 /** Ciemniejsze pole wewnątrz okna / bloku. */
 private fun Modifier.pane(r: Int = 13): Modifier = composed {
     val shape = LocalTheme.current.shape(d(r))
-    clip(shape).background(if (LightMode.on) Color(0x0F000000) else Color(0x73050816)).border(1.dp, Line, shape)
+    clip(shape).background(if (LightMode.on) Color(0x0F000000) else if (themeState.value.gloss) Color(0x73080604) else Color(0x73050816)).border(1.dp, Line, shape)
 }
 
 @Composable

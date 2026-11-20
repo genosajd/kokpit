@@ -274,7 +274,7 @@ private object AssistantTools {
         ),
         Def(
             "radio_control",
-            "Obsługa radia i Kokpitu. action: volume_set (value 0–100 %), volume_up, volume_down, mute, unmute, brightness_set (value 0–100 %), idrive_screen (oryginalny ekran BMW iDrive), split_screen (Mapy + YouTube obok siebie), radio_settings (ustawienia radia Witstek), android_settings, home (ekran Kokpitu), theme (value: 0 = Płaski, 1 = BMW iDrive, 2 = M Sport), status (głośność i jasność). Dla akcji bez liczby podaj value 0.",
+            "Obsługa radia i Kokpitu. action: volume_set (value 0–100 %), volume_up, volume_down, mute, unmute, brightness_set (value 0–100 %), idrive_screen (oryginalny ekran BMW iDrive), split_screen (Mapy + YouTube obok siebie), radio_settings (ustawienia radia Witstek), android_settings, home (ekran Kokpitu), theme (value: 0 = Płaski, 1 = BMW iDrive, 2 = M Sport, 3 = iDrive 8, 4 = Individual), status (głośność i jasność). Dla akcji bez liczby podaj value 0.",
             mapOf(
                 "action" to mapOf("type" to "string", "enum" to listOf(
                     "status", "volume_set", "volume_up", "volume_down", "mute", "unmute", "brightness_set",

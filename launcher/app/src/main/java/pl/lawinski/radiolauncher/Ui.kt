@@ -154,16 +154,16 @@ import java.util.Date
 import java.util.Locale
 
 // kolory zależne od trybu jasny/ciemny (LightMode); odczyt w kompozycji = przerysowanie po zmianie
-val Bg: Color get() = if (LightMode.on) Color(0xFFE9EEF4) else Color(0xFF07090D)
-val CardBg: Color get() = if (LightMode.on) Color(0xFFFFFFFF) else Color(0xFF11161E)
-val CardHi: Color get() = if (LightMode.on) Color(0xFFEDF1F6) else Color(0xFF161D27)
+val Bg: Color get() = if (LightMode.on) Color(0xFFE9EEF4) else if (themeState.value.card != null) Color(0xFF070605) else Color(0xFF07090D)
+val CardBg: Color get() = if (LightMode.on) Color(0xFFFFFFFF) else themeState.value.card ?: Color(0xFF11161E)
+val CardHi: Color get() = if (LightMode.on) Color(0xFFEDF1F6) else if (themeState.value.card != null) Color(0xFF1D1913) else Color(0xFF161D27)
 val Line: Color get() = if (LightMode.on) Color(0x1A000000) else Color(0x12FFFFFF)
-val Txt: Color get() = if (LightMode.on) Color(0xFF111824) else Color(0xFFEEF2F7)
-val Dim: Color get() = if (LightMode.on) Color(0xFF5A6678) else Color(0xFF8A96A8)
+val Txt: Color get() = if (LightMode.on) Color(0xFF111824) else themeState.value.text ?: Color(0xFFEEF2F7)
+val Dim: Color get() = if (LightMode.on) Color(0xFF5A6678) else themeState.value.dim ?: Color(0xFF8A96A8)
 /** Kolor akcentu: z Dostosuj, inaczej niebieski. Odczyt w kompozycji = przerysowanie po zmianie. */
 val Accent: Color get() = ThemeCustoms.current().let { c ->
     // w wyglądach z barwionymi blokami (iDrive 8) sam kolor poświaty przebarwia też ikony
-    Color(c.accent ?: c.glow?.takeIf { themeState.value.planes != null } ?: DEFAULT_ACCENT)
+    (c.accent ?: c.glow?.takeIf { themeState.value.planes != null })?.let { Color(it) } ?: themeState.value.accent ?: Color(DEFAULT_ACCENT)
 }
 val Warn = Color(0xFFFFB547)
 
@@ -238,10 +238,11 @@ fun LauncherScreen(act: MainActivity) {
     val theme = effectiveTheme()
     val custom = ThemeCustoms.current()
     val animate = theme.animated && act.visible.value && !edit
+    val gloss = theme.gloss && act.visible.value && !edit
     MaterialTheme(colorScheme = if (LightMode.on) androidx.compose.material3.lightColorScheme(primary = Accent, surface = CardBg, background = Bg)
         else darkColorScheme(primary = Accent, surface = CardBg, background = Bg)) {
       CompositionLocalProvider(
-          LocalTheme provides theme, LocalAnimate provides animate, LocalFontScale provides custom.fontScale,
+          LocalTheme provides theme, LocalAnimate provides animate, LocalGloss provides gloss, LocalFontScale provides custom.fontScale,
           androidx.compose.material3.LocalTextStyle provides androidx.compose.material3.LocalTextStyle.current.copy(fontFamily = Fonts.family(custom.font)),
       ) {
         BoxWithConstraints(
@@ -268,6 +269,7 @@ fun LauncherScreen(act: MainActivity) {
             LaunchedEffect(cols) { if (Prefs.layout.isNullOrBlank()) act.layout.value = LayoutStore.defaultFor(cols) }
             val u = minOf(maxWidth / (320f * cols), maxHeight / (360f * GRID_ROWS))
             if (animate) Aurora()
+            if (gloss) GlintDriver()
             CompositionLocalProvider(LocalU provides u) {
                 Column(Modifier.fillMaxSize().padding(horizontal = d(28))) {
                     if (edit) {
@@ -412,8 +414,24 @@ fun Block(modifier: Modifier, content: @Composable () -> Unit) {
             .background(LocalTheme.current.block)
             .border(1.dp, LocalTheme.current.blockEdge, LocalTheme.current.shape(d(28)))
     ) {
+        val look = LocalTheme.current
+        if (look.gloss) {
+            // poświata u góry bloku i złota kreska na górnej krawędzi (jaśniejsza pośrodku)
+            val gold = look.accent ?: Accent
+            val hi = look.sweep
+            Box(Modifier.matchParentSize().drawBehind {
+                val c = Offset(size.width / 2f, 0f)
+                val r = size.width * 0.75f
+                drawScale(1f, 0.55f, pivot = c) { drawCircle(Brush.radialGradient(listOf(gold.copy(alpha = 0.13f), Color.Transparent), c, r), r, c) }
+                drawRect(
+                    Brush.horizontalGradient(listOf(Color.Transparent, gold, hi, gold, Color.Transparent)),
+                    Offset.Zero, androidx.compose.ui.geometry.Size(size.width, 2.dp.toPx()),
+                )
+            })
+        }
         content()
         if (animate) BlockSweep()
+        if (LocalGloss.current) BlockGloss()
     }
 }
 
@@ -437,10 +455,10 @@ private val OK_KEYS = setOf(Key.Enter, Key.NumPadEnter, Key.DirectionCenter)
  * fill = false: bez tła (np. kafelek „Dodaj”), active = element włączony (np. „3D”).
  */
 /** [field] = pole tekstowe: przy wpisywaniu nie rośnie, nie pulsuje i nie zmienia tła – zostaje tylko obwódka wyboru. */
-fun Modifier.kokpitSurface(radius: Dp, fill: Boolean = true, active: Boolean = false, field: Boolean = false): Modifier = composed {
+fun Modifier.kokpitSurface(radius: Dp, fill: Boolean = true, active: Boolean = false, field: Boolean = false, pill: Boolean = false): Modifier = composed {
     val t = LocalTheme.current
     var focused by remember { mutableStateOf(false) }
-    val shape = t.shape(radius)
+    val shape = if (pill && t.pills) RoundedCornerShape(50) else t.shape(radius)
     val ring = d(3)
     val pulse = if (focused && !field && LocalAnimate.current) loop(1600) else null
     // naciśnięcie: element się wciska i rozjaśnia, żeby było widać, że dotyk zadziałał
@@ -498,13 +516,13 @@ fun Modifier.kokpitSurface(radius: Dp, fill: Boolean = true, active: Boolean = f
 @Composable
 fun Pill(icon: ImageVector?, text: String, color: Color = Txt, active: Boolean = false, onClick: () -> Unit) {
     Row(
-        Modifier.kokpitSurface(d(14), active = active)
+        Modifier.kokpitSurface(d(14), active = active, pill = true)
             .combinedClickable(onClick = onClick)
-            .padding(horizontal = d(20), vertical = d(8)),
+            .padding(horizontal = d(if (LocalTheme.current.pills) 24 else 20), vertical = d(8)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (icon != null) {
-            Icon(icon, null, tint = color, modifier = Modifier.size(d(28)))
+            Icon(icon, null, tint = if (LocalTheme.current.pills && !active && color == Txt) Accent else color, modifier = Modifier.size(d(28)))
             if (text.isNotEmpty()) Spacer(Modifier.width(d(10)))
         }
         Text(text, color = color, fontSize = s(22), fontWeight = FontWeight.Medium)
@@ -533,7 +551,11 @@ fun StatusBar(onSettings: () -> Unit, onEdit: () -> Unit) {
         val cols = GridGeom.cols.intValue
         val wide = cols >= 7
         val labels = cols >= 6
-        Text(time, color = Txt, fontSize = s(36), fontWeight = FontWeight.Medium, maxLines = 1)
+        val look = LocalTheme.current
+        Text(
+            time, color = Txt, fontSize = s(if (look.numbers != null) 42 else 36), fontWeight = FontWeight.Medium, maxLines = 1, fontFamily = look.numbers,
+            style = if (look.gloss) look.speed?.let { androidx.compose.ui.text.TextStyle(brush = it) } ?: androidx.compose.ui.text.TextStyle.Default else androidx.compose.ui.text.TextStyle.Default,
+        )
         if (wide) {
             Spacer(Modifier.width(d(26)))
             Text(date, color = Dim, fontSize = s(26), maxLines = 1)
@@ -544,7 +566,11 @@ fun StatusBar(onSettings: () -> Unit, onEdit: () -> Unit) {
             Spacer(Modifier.width(d(8)))
             Text(outside, color = Dim, fontSize = s(26), maxLines = 1)
         }
-        Spacer(Modifier.weight(1f))
+        if (LocalTheme.current.gloss) {
+            // złota linia gasnąca ku bokom, jak w projekcie wyglądu
+            val gold = LocalTheme.current.accent ?: Accent
+            Box(Modifier.weight(1f).padding(horizontal = d(34)).height(1.dp).background(Brush.horizontalGradient(listOf(Color.Transparent, gold.copy(alpha = 0.55f), Color.Transparent))))
+        } else Spacer(Modifier.weight(1f))
         SystemIcons()
         Spacer(Modifier.width(d(20)))
         VolumeControl()
@@ -874,6 +900,59 @@ fun Tile(
 
 // ---------- auto ----------
 
+/**
+ * Scena pod autem w wyglądzie z przebłyskami (Individual): światło z góry, błyszcząca posadzka ze złotą
+ * linią horyzontu, odbicie auta ([mirror] – tylko wbudowane zdjęcie) i pas światła sunący po posadzce.
+ */
+@Composable
+private fun androidx.compose.foundation.layout.BoxScope.CarStage(carTop: Dp, mirror: Boolean) {
+    val theme = LocalTheme.current
+    val gold = theme.accent ?: Accent
+    val hi = theme.sweep
+    Box(Modifier.matchParentSize().drawBehind {
+        val w = size.width; val hgt = size.height
+        val top = carTop.toPx()
+        // ramka zdjęcia auta 1200×500 wpisana w blok, koła przy jej dolnej krawędzi (jak w CarBlock)
+        val k = minOf(w * 0.95f / 1200f, (hgt - top) / 500f)
+        val fw = 1200f * k; val fh = 500f * k
+        val cx = w / 2f
+        val floor = (hgt + top) / 2f + fh * 0.44f
+        val horizon = floor - fh * 0.16f
+        // reflektor z góry
+        val lampC = Offset(cx, 0f)
+        drawScale(1f, 0.9f, pivot = lampC) {
+            drawCircle(Brush.radialGradient(listOf(hi.copy(alpha = 0.16f), Color.Transparent), lampC, w * 0.55f), w * 0.55f, lampC)
+        }
+        // posadzka: połysk gasnący ku dołowi i złota linia horyzontu gasnąca ku bokom
+        drawRect(Brush.verticalGradient(listOf(gold.copy(alpha = 0.13f), Color.Transparent), horizon, hgt), Offset(0f, horizon), androidx.compose.ui.geometry.Size(w, hgt - horizon))
+        drawRect(
+            Brush.horizontalGradient(listOf(Color.Transparent, gold.copy(alpha = 0.55f), hi.copy(alpha = 0.8f), gold.copy(alpha = 0.55f), Color.Transparent)),
+            Offset(0f, horizon), androidx.compose.ui.geometry.Size(w, 1.dp.toPx()),
+        )
+        val shadowC = Offset(cx, floor - fh * 0.02f)
+        val sr = fw * 0.38f
+        drawScale(1f, 0.11f, pivot = shadowC) {
+            drawCircle(Brush.radialGradient(listOf(Color(0xCC000000), Color.Transparent), shadowC, sr), sr, shadowC)
+        }
+    })
+    if (LocalGloss.current) FloorGlint(carTop)
+    if (mirror) Image(
+        painterResource(R.drawable.car_f11), null, contentScale = ContentScale.Fit,
+        modifier = Modifier.align(Alignment.Center).fillMaxWidth(0.95f).padding(top = d(70))
+            .graphicsLayer {
+                scaleY = -1f
+                translationY = size.height * 0.66f
+                alpha = 0.2f
+                compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen
+            }
+            .drawWithContent {
+                drawContent()
+                // w odbiciu zostaje tylko część przy kołach
+                drawRect(Brush.verticalGradient(0.5f to Color.Transparent, 1f to Color.Black), blendMode = androidx.compose.ui.graphics.BlendMode.DstIn)
+            },
+    )
+}
+
 @Composable
 fun CarBlock(modifier: Modifier, act: MainActivity, apps: List<AppEntry>, edit: Boolean, onSplitSettings: () -> Unit) {
     val speed by act.location.speedKmh.collectAsState()
@@ -918,6 +997,7 @@ fun CarBlock(modifier: Modifier, act: MainActivity, apps: List<AppEntry>, edit: 
             }
         ) {
             if (LocalAnimate.current && theme.planes == null) CarGlow(theme.glow)
+            if (theme.gloss) CarStage(carTop, mirror = car.open.isEmpty() && CarPhoto.image.value == null)
             when {
                 car.open.isNotEmpty() -> Row(Modifier.fillMaxSize().padding(vertical = d(24)), verticalAlignment = Alignment.CenterVertically) {
                     Spacer(Modifier.weight(1f))
@@ -944,11 +1024,19 @@ fun CarBlock(modifier: Modifier, act: MainActivity, apps: List<AppEntry>, edit: 
                 }
             }
 
+            if (LocalGloss.current && car.open.isEmpty()) {
+                // iskry na karoserii – rozbłyskują kolejno w każdej serii przebłysków
+                Spark(0.30f, 0.50f, d(34), 0.9f)
+                Spark(0.55f, 0.42f, d(24), 1.5f)
+                Spark(0.74f, 0.56f, d(28), 2.1f)
+            }
+
             Row(Modifier.padding(start = d(34), top = d(30)), verticalAlignment = Alignment.Bottom) {
                 // wygląd animowany: prędkość dochodzi płynnie do nowej wartości
                 val shown by androidx.compose.animation.core.animateIntAsState(speed ?: 0, label = "speed")
                 Text(
                     if (speed == null) "—" else (if (LocalAnimate.current) shown else speed).toString(), color = Txt, fontSize = s(96), fontWeight = FontWeight.Light,
+                    fontFamily = theme.numbers,
                     style = theme.speed?.let { androidx.compose.ui.text.TextStyle(brush = it) } ?: androidx.compose.ui.text.TextStyle.Default,
                 )
                 Spacer(Modifier.width(d(10)))
@@ -984,7 +1072,17 @@ fun CarBlock(modifier: Modifier, act: MainActivity, apps: List<AppEntry>, edit: 
                         Text("${fuel.toInt()} l", color = Txt, fontSize = s(40), fontWeight = FontWeight.Medium)
                         car.rangeKm?.let { Text("  · ${it} km", color = Dim, fontSize = s(22)) }
                     }
-                    Box(Modifier.padding(top = d(10)).fillMaxWidth().height(d(8)).clip(RoundedCornerShape(d(8))).background(Color(0x14FFFFFF))) {
+                    if (theme.gloss) {
+                        val tick = (theme.accent ?: Accent).copy(alpha = 0.6f)
+                        Box(Modifier.padding(top = d(8)).fillMaxWidth().height(d(10)).drawBehind {
+                            val n = 10
+                            for (i in 0..n) {
+                                val x = (size.width - 1.dp.toPx()) * i / n
+                                drawRect(tick, Offset(x, if (i % 5 == 0) 0f else size.height * 0.45f), androidx.compose.ui.geometry.Size(1.dp.toPx(), size.height))
+                            }
+                        })
+                    }
+                    Box(Modifier.padding(top = d(if (theme.gloss) 2 else 10)).fillMaxWidth().height(d(if (theme.gloss) 3 else 8)).clip(RoundedCornerShape(d(8))).background(if (theme.gloss) (theme.accent ?: Accent).copy(alpha = 0.22f) else Color(0x14FFFFFF))) {
                         Box(Modifier.fillMaxWidth((fuel / CarData.TANK_L).coerceIn(0f, 1f)).fillMaxHeight().clipToBounds().background(if (fuel < 10) SolidColor(Warn) else theme.fuel)) {
                             if (LocalAnimate.current) Shimmer()
                         }

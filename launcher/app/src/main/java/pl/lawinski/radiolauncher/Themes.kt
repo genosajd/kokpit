@@ -58,12 +58,27 @@ data class KokpitTheme(
     val cut: Boolean = false,
     /** dwie ukośne płaszczyzny światła w tle ekranu (rysowane raz, bez ruchu); null = bez */
     val planes: Pair<Color, Color>? = null,
+    /** własny kolor ikon i akcentów wyglądu (null = niebieski albo z Dostosuj) */
+    val accent: Color? = null,
+    /** własne kolory tekstu w trybie ciemnym: główny i przygaszony (null = wspólne) */
+    val text: Color? = null,
+    val dim: Color? = null,
+    /** tło okien i list (null = wspólne) */
+    val card: Color? = null,
+    /** krój dużych liczb: godzina, prędkość (null = zwykły) */
+    val numbers: androidx.compose.ui.text.font.FontFamily? = null,
+    /** przebłyski światła na blokach i scena pod autem (Anim.kt, Glint): płynne, w krótkich seriach */
+    val gloss: Boolean = false,
+    /** mnożnik zaokrągleń bloków i przycisków (1 = zwykłe) */
+    val corner: Float = 1f,
+    /** przyciski górnego paska w pełni owalne, z ikoną w kolorze akcentu */
+    val pills: Boolean = false,
 ) {
     /** Kształt bloku, okna albo przycisku o promieniu [r] w tym wyglądzie. */
     fun shape(r: androidx.compose.ui.unit.Dp): androidx.compose.ui.graphics.Shape =
         if (cut) androidx.compose.foundation.shape.CutCornerShape(topStart = 0f, topEnd = 0f, bottomEnd = 0f, bottomStart = 0f)
             .copy(topEnd = androidx.compose.foundation.shape.CornerSize(r * 0.8f), bottomStart = androidx.compose.foundation.shape.CornerSize(r * 0.8f))
-        else androidx.compose.foundation.shape.RoundedCornerShape(r)
+        else androidx.compose.foundation.shape.RoundedCornerShape(r * corner)
 }
 
 private fun v(vararg c: Long) = Brush.verticalGradient(c.map { Color(it) })
@@ -161,8 +176,37 @@ object Themes {
         planes = Color(0x29466EFF) to Color(0x269650FF),
     )
 
+    /** Limuzyna: czerń fortepianowa i szampańskie złoto, szeryfowe liczby, płynne przebłyski światła. */
+    val INDIVIDUAL = KokpitTheme(
+        id = "individual",
+        name = "Individual",
+        description = "Czerń i złoto: lśniące krawędzie, przebłyski światła na blokach, auto na błyszczącej posadzce",
+        screen = v(0xFF19140B, 0xFF080706, 0xFF050505),
+        block = v(0xFF221D15, 0xFF12100C, 0xFF0A0908),
+        blockEdge = solid(0x47D9B56D),
+        surface = v(0xFF2B251B, 0xFF19150F, 0xFF120F0B),
+        surfaceEdge = v(0x73E2C27C, 0x40D9B56D, 0x4DD9B56D),
+        selected = v(0x73D9B56D, 0x47B8934A, 0x298A6D32),
+        selectedRing = Color(0xFFFFF3CF),
+        active = h(0xFFB8934A, 0xFFF3DFA6, 0xFFC9A55C),
+        activeText = Color(0xFF17120A),
+        carBack = v(0x00000000, 0x00000000, 0x00000000),
+        fuel = h(0xFFB8934A, 0xFFD9B56D, 0xFFFFF3CF),
+        speed = v(0xFFFFF6DC, 0xFFE2C27C, 0xFFA8843F),
+        glow = Color(0x33D9B56D),
+        sweep = Color(0xFFFFF3CF),
+        accent = Color(0xFFD9B56D),
+        text = Color(0xFFF1EAD9),
+        dim = Color(0xFFA99F8A),
+        card = Color(0xFF14110D),
+        numbers = androidx.compose.ui.text.font.FontFamily.Serif,
+        gloss = true,
+        corner = 0.5f,
+        pills = true,
+    )
+
     /** Wszystkie wyglądy do wyboru, w tej kolejności w Ustawieniach. */
-    val all = listOf(FLAT, BMW_IDRIVE, M_SPORT, IDRIVE8)
+    val all = listOf(FLAT, BMW_IDRIVE, M_SPORT, IDRIVE8, INDIVIDUAL)
 
     fun byId(id: String?) = all.firstOrNull { it.id == id }
         ?: if (id == "anim") BMW_IDRIVE else FLAT // "anim" = dawny „Animowany” (0.3.5)

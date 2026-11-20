@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
@@ -146,5 +147,136 @@ fun BoxScope.Shimmer() {
         Modifier.fillMaxHeight().fillMaxWidth(0.35f)
             .graphicsLayer { translationX = (p.value * 4f - 1f) * size.width }
             .drawBehind { drawRect(Brush.horizontalGradient(listOf(Color.Transparent, Color(0x99FFFFFF), Color.Transparent))) }
+    )
+}
+
+/*
+ * Przebłyski wyglądu z KokpitTheme.gloss (Individual). Muszą być płynne, więc idą w pełnym tempie ekranu,
+ * ale tylko w krótkich seriach: co kilka sekund jedna seria (ok. 3 s), w której po każdym bloku
+ * przechodzi ukośna smuga światła, po posadzce pod autem pas światła, a na aucie migają iskry.
+ * Między seriami nic się nie rysuje. Każdy efekt to gotowa warstwa, której zmienia się tylko
+ * przesunięcie, krycie albo skala (graphicsLayer) – treść bloków nie jest przerysowywana.
+ */
+
+/** true: przebłyski włączone (wygląd z gloss, Kokpit widoczny, bez edycji układu). */
+val LocalGloss = compositionLocalOf { false }
+
+object Glint {
+    /** sekundy od początku bieżącej serii; ujemne = przerwa */
+    val t = androidx.compose.runtime.mutableFloatStateOf(-1f)
+    const val ACTIVE = 3.4f
+    const val PAUSE_MS = 5200L
+
+    /** postęp 0..1 efektu zaczynającego się [start] s po początku serii i trwającego [dur] s; null = poza efektem */
+    fun progress(start: Float, dur: Float): Float? {
+        val x = (t.floatValue - start) / dur
+        return if (x < 0f || x > 1f) null else x
+    }
+}
+
+/** Zegar serii przebłysków: klatki ekranu tylko w czasie serii. */
+@Composable
+fun GlintDriver() {
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        try {
+            kotlinx.coroutines.delay(1200)
+            while (true) {
+                val start = androidx.compose.runtime.withFrameNanos { it }
+                while (true) {
+                    val now = androidx.compose.runtime.withFrameNanos { it }
+                    val sec = (now - start) / 1_000_000_000f
+                    if (sec > Glint.ACTIVE) break
+                    Glint.t.floatValue = sec
+                }
+                Glint.t.floatValue = -1f
+                kotlinx.coroutines.delay(Glint.PAUSE_MS)
+            }
+        } finally {
+            Glint.t.floatValue = -1f
+        }
+    }
+}
+
+private var glossCounter = 0
+
+/** Ukośna smuga światła przechodząca przez blok i jasny punkt biegnący po jego górnej krawędzi. */
+@Composable
+fun BoxScope.BlockGloss() {
+    val start = remember { (glossCounter++ % 7) * 0.28f }
+    val hi = LocalTheme.current.sweep
+    // smuga: wyższa niż blok i pochylona, żeby po obrocie zakrywała całą wysokość
+    Box(
+        Modifier.align(Alignment.CenterStart).fillMaxWidth(0.30f).fillMaxHeight()
+            .graphicsLayer {
+                val p = Glint.progress(start, 1.5f)
+                if (p == null) { alpha = 0f; return@graphicsLayer }
+                val e = FastOutSlowInEasing.transform(p)
+                val full = size.width / 0.30f
+                translationX = -size.width * 1.4f + e * (full + size.width * 2.6f)
+                rotationZ = 16f
+                scaleY = 1.7f
+                alpha = (kotlin.math.sin(p * Math.PI).toFloat() * 1.6f).coerceAtMost(1f)
+            }
+            .drawBehind {
+                drawRect(Brush.horizontalGradient(listOf(Color.Transparent, hi.copy(alpha = 0.07f), hi.copy(alpha = 0.17f), hi.copy(alpha = 0.07f), Color.Transparent)))
+            }
+    )
+    Box(
+        Modifier.align(Alignment.TopStart).fillMaxWidth(0.34f).height(2.dp)
+            .graphicsLayer {
+                val p = Glint.progress(start, 1.5f)
+                if (p == null) { alpha = 0f; return@graphicsLayer }
+                val e = FastOutSlowInEasing.transform(p)
+                translationX = -size.width + e * (size.width / 0.34f + size.width)
+                alpha = 1f
+            }
+            .drawBehind { drawRect(Brush.horizontalGradient(listOf(Color.Transparent, hi, Color.White, hi, Color.Transparent))) }
+    )
+}
+
+/** Pas światła przesuwający się po posadzce pod autem. */
+@Composable
+fun BoxScope.FloorGlint(top: androidx.compose.ui.unit.Dp) {
+    val hi = LocalTheme.current.sweep
+    Box(
+        Modifier.align(Alignment.BottomStart).fillMaxWidth(0.22f).fillMaxHeight().graphicsLayer {
+            val p = Glint.progress(0.5f, 2.4f)
+            if (p == null) { alpha = 0f; return@graphicsLayer }
+            translationX = -size.width + p * (size.width / 0.22f + size.width)
+            alpha = kotlin.math.sin(p * Math.PI).toFloat()
+        }.drawBehind {
+            val y = top.toPx()
+            drawRect(
+                Brush.horizontalGradient(listOf(Color.Transparent, hi.copy(alpha = 0.16f), Color.Transparent)),
+                topLeft = androidx.compose.ui.geometry.Offset(0f, y), size = androidx.compose.ui.geometry.Size(size.width, size.height - y),
+            )
+        }
+    )
+}
+
+/** Iskra (czteroramienna gwiazdka) rozbłyskująca na chwilę w serii; [x], [y] – ułamki bloku. */
+@Composable
+fun BoxScope.Spark(x: Float, y: Float, size: androidx.compose.ui.unit.Dp, start: Float) {
+    val hi = LocalTheme.current.sweep
+    Box(
+        Modifier.align(androidx.compose.ui.BiasAlignment(x * 2f - 1f, y * 2f - 1f)).size(size).graphicsLayer {
+            val p = Glint.progress(start, 0.9f)
+            if (p == null) { alpha = 0f; return@graphicsLayer }
+            val k = kotlin.math.sin(p * Math.PI).toFloat()
+            alpha = k
+            scaleX = 0.3f + 0.7f * k
+            scaleY = scaleX
+            rotationZ = 90f * p
+        }.drawBehind {
+            val c = center
+            val r = this.size.minDimension / 2f
+            val w = r * 0.14f
+            val star = androidx.compose.ui.graphics.Path().apply {
+                moveTo(c.x, c.y - r); lineTo(c.x + w, c.y - w); lineTo(c.x + r, c.y); lineTo(c.x + w, c.y + w)
+                lineTo(c.x, c.y + r); lineTo(c.x - w, c.y + w); lineTo(c.x - r, c.y); lineTo(c.x - w, c.y - w); close()
+            }
+            drawCircle(Brush.radialGradient(listOf(hi.copy(alpha = 0.5f), Color.Transparent), c, r * 0.7f), r * 0.7f, c)
+            drawPath(star, Color.White)
+        }
     )
 }

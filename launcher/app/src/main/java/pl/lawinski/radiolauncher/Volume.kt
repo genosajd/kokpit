@@ -151,12 +151,12 @@ fun VolumeControl() {
     val popupY = with(LocalDensity.current) { d(64).roundToPx() }
     Box {
         Row(
-            Modifier.kokpitSurface(d(14), active = open)
+            Modifier.kokpitSurface(d(14), active = open, pill = true)
                 .combinedClickable(onClick = { open = !open })
                 .padding(horizontal = d(14), vertical = d(8)),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(icon, null, tint = if (muted) Warn else Txt, modifier = Modifier.size(d(28)))
+            Icon(icon, null, tint = if (muted) Warn else if (LocalTheme.current.pills && !open) Accent else Txt, modifier = Modifier.size(d(28)))
             Spacer(Modifier.width(d(8)))
             Text(if (muted) "wycisz." else "$vol", color = Txt, fontSize = s(22), fontWeight = FontWeight.Medium)
         }
