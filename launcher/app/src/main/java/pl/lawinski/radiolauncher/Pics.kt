@@ -31,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -286,6 +287,54 @@ object Pics {
         runCatching { root?.deleteRecursively() }
     }
 
+    /**
+     * Kopiuje obraz do pamięci radia (Obrazy/Kokpit) – widać go potem w Galerii i w menedżerze plików
+     * i zostaje po usunięciu rozmowy. Nazwa wynika z pliku źródłowego, więc ten sam obraz nie zapisze się dwa razy.
+     * Zwraca komunikat dla rozmówcy.
+     */
+    fun save(ctx: Context, pic: Pic): String {
+        if (android.os.Build.VERSION.SDK_INT < 29) return "Zapis obrazów wymaga Androida 10 lub nowszego"
+        val src = File(pic.file)
+        if (!src.isFile) return "Tego obrazu nie ma już w pamięci radia"
+        val stamp = src.name.substringBefore('_').toLongOrNull() ?: src.lastModified()
+        val name = "Kokpit_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date(stamp)) +
+            "_" + src.name.substringAfter('_', "0").substringBefore('.') + ".jpg"
+        val images = android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        val folder = android.os.Environment.DIRECTORY_PICTURES + "/Kokpit"
+        val cr = ctx.contentResolver
+        return try {
+            val there = cr.query(images, arrayOf(android.provider.MediaStore.MediaColumns._ID), "${android.provider.MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${android.provider.MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?", arrayOf(name, "$folder%"), null)
+                ?.use { it.count > 0 } ?: false
+            if (there) return "Ten obraz jest już zapisany (Obrazy/Kokpit)"
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, name)
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, folder)
+                put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+            val uri = cr.insert(images, values) ?: return "Radio nie pozwoliło zapisać obrazu"
+            try {
+                (cr.openOutputStream(uri) ?: throw IllegalStateException("brak dostępu do pliku")).use { out -> src.inputStream().use { it.copyTo(out) } }
+                cr.update(uri, android.content.ContentValues().apply { put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+            } catch (e: Exception) {
+                runCatching { cr.delete(uri, null, null) }
+                throw e
+            }
+            "Zapisano: Obrazy/Kokpit/$name"
+        } catch (e: Exception) {
+            "Nie udało się zapisać obrazu: ${e.message ?: e}"
+        }
+    }
+
+    /** Zapis w tle z krótkim komunikatem na ekranie (przycisk przy miniaturze i w podglądzie). */
+    fun saveWithToast(ctx: Context, pic: Pic) {
+        val app = ctx.applicationContext
+        Thread {
+            val msg = save(app, pic)
+            android.os.Handler(android.os.Looper.getMainLooper()).post { android.widget.Toast.makeText(app, msg, android.widget.Toast.LENGTH_LONG).show() }
+        }.start()
+    }
+
     /** Obraz z pliku zmniejszony do [maxSide] (miniatury nie wczytują pełnego zdjęcia). */
     fun load(path: String, maxSide: Int): Bitmap? = runCatching {
         val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -304,9 +353,12 @@ private fun picBitmap(path: String, maxSide: Int): ImageBitmap? {
     return bmp
 }
 
-/** Miniatury obrazów pod odpowiedzią asystenta; dotknięcie otwiera podgląd na cały ekran. */
+/**
+ * Miniatury obrazów pod odpowiedzią asystenta; dotknięcie otwiera podgląd na cały ekran.
+ * [save] dokłada na każdej miniaturze przycisk zapisu obrazu do pamięci radia (duże okno rozmowy).
+ */
 @Composable
-fun PicThumbs(ctx: Context, pics: List<Pic>, height: Dp, modifier: Modifier = Modifier) {
+fun PicThumbs(ctx: Context, pics: List<Pic>, height: Dp, modifier: Modifier = Modifier, save: Boolean = false) {
     if (pics.isEmpty()) return
     LazyRow(modifier, horizontalArrangement = Arrangement.spacedBy(height / 12)) {
         items(pics.size) { i ->
@@ -316,6 +368,11 @@ fun PicThumbs(ctx: Context, pics: List<Pic>, height: Dp, modifier: Modifier = Mo
                     .clickable { PicActivity.open(ctx, pics, i) },
             ) {
                 if (bmp != null) Image(bmp, pics[i].caption, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                if (save) Box(
+                    Modifier.align(Alignment.BottomEnd).padding(height / 24).size(height / 3).clip(CircleShape).background(Color(0xB3101622))
+                        .clickable { Pics.saveWithToast(ctx, pics[i]) },
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Icons.Filled.Download, "Zapisz obraz w pamięci radia", tint = Color.White, modifier = Modifier.size(height / 5)) }
             }
         }
     }
@@ -372,6 +429,9 @@ class PicActivity : ComponentActivity() {
                     if (pics.size > 1) Text("${pager.currentPage + 1} / ${pics.size}", color = Color(0xFFB8C2D0), fontSize = 20.sp, modifier = Modifier.padding(start = 20.dp))
                 }
                 RoundButton(Icons.Filled.Close, "Zamknij", Modifier.align(Alignment.TopEnd).padding(18.dp)) { finish() }
+                RoundButton(Icons.Filled.Download, "Zapisz obraz w pamięci radia", Modifier.align(Alignment.TopEnd).padding(top = 18.dp, end = 108.dp)) {
+                    Pics.saveWithToast(this@PicActivity, pics[pager.currentPage])
+                }
                 if (pager.currentPage > 0) RoundButton(Icons.Filled.ChevronLeft, "Poprzedni", Modifier.align(Alignment.CenterStart).padding(18.dp)) {
                     scope.launch { pager.animateScrollToPage(pager.currentPage - 1) }
                 }

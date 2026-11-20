@@ -63,6 +63,7 @@ enum class BlockId(val title: String, val minW: Int, val minH: Int, val multi: B
     TUYA("Urządzenie Tuya", 1, 1, multi = true),
     MEDIA("Multimedia", 1, 1),
     PHONE("Telefon", 1, 1),
+    FAMILY("Bliscy", 1, 1),
 }
 
 /** Położenie klocka na siatce (8 kolumn na stronę × GRID_ROWS wierszy): kolumna, rząd, szerokość, wysokość; n = numer egzemplarza. */

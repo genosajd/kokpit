@@ -230,6 +230,13 @@ object Mcp {
         }
     }
 
+    /** Surowy wynik narzędzia (dla widżetów czytających structuredContent); błąd = wyjątek z opisem po polsku. Poza wątkiem UI. */
+    fun raw(server: Server, tool: String, input: JSONObject): JSONObject = try {
+        rpc(server, "tools/call", JSONObject().put("name", tool).put("arguments", input))
+    } catch (e: Exception) {
+        throw Exception(describe(e))
+    }
+
     fun add(name: String, url: String, token: String): String? {
         val n = name.trim()
         val u = url.trim()

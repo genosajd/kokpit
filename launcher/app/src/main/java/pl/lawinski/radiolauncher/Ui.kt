@@ -44,6 +44,7 @@ import androidx.compose.material.icons.outlined.AcUnit
 import androidx.compose.material.icons.outlined.DirectionsCar
 import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.MusicNote
+import androidx.compose.material.icons.outlined.People
 import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.WaterDrop
@@ -316,6 +317,7 @@ fun LauncherScreen(act: MainActivity) {
                                 BlockId.ASSISTANT -> AssistantBlock(m, slot, act, onSettings = { Prefs.settingsGroup = 7; dialog = Dlg.Settings })
                                 BlockId.WIDGET -> WidgetBlock(m, act, slot.n, onChoose = { dialog = Dlg.Widgets(slot.n) })
                                 BlockId.PHONE -> PhoneBlock(m, slot, act, onSearch = { dialog = Dlg.Phone(true) }, onOpen = { dialog = Dlg.Phone() })
+                                BlockId.FAMILY -> FamilyBlock(m, slot, act, onSettings = { Prefs.settingsGroup = 7; dialog = Dlg.Settings })
                             }
                         }
                     }
@@ -596,6 +598,7 @@ private fun blockInfo(id: BlockId) = when (id) {
     BlockId.TUYA -> BlockInfo(Icons.Outlined.Lightbulb, "Światło · czujnik", "Urządzenie Smart Life – można dodać kilka")
     BlockId.MEDIA -> BlockInfo(Icons.Outlined.MusicNote, "Tytuł · wykonawca", "Steruje tym, co gra: YouTube, SoundCloud i inne")
     BlockId.PHONE -> BlockInfo(Icons.Outlined.Phone, "Klawiatura · kontakty", "Dzwonienie przez Bluetooth radia")
+    BlockId.FAMILY -> BlockInfo(Icons.Outlined.People, "Kto · gdzie · kiedy", "Położenia bliskich i urządzeń z serwera lokalizacji (MCP)")
 }
 
 /** Okno „Widżety” w edycji układu: siatka klocków z podglądem i nazwą; dotknięcie dodaje klocek do ekranu. */
@@ -1536,7 +1539,7 @@ private fun ChatLines(
                                 .padding(horizontal = d(16), vertical = d(10)),
                         )
                         // obrazy pokazane przy tej odpowiedzi; dotknięcie otwiera podgląd na cały ekran
-                        PicThumbs(act, l.pics, d(if (onDelete != null) 170 else 120), Modifier.padding(top = d(8)))
+                        PicThumbs(act, l.pics, d(if (onDelete != null) 170 else 120), Modifier.padding(top = d(8)), save = onDelete != null)
                     }
                     if (!l.fromUser) { trash(); time() }
                 }
