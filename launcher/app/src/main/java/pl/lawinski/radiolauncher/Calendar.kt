@@ -26,6 +26,25 @@ object KokpitCalendar {
     fun now(): String = SimpleDateFormat("EEEE d MMMM yyyy, HH:mm", PL).format(java.util.Date())
 
     /** Terminy od dnia [fromDate] (yyyy-MM-dd, pusty = dziś) przez [days] dni. */
+    /** Najbliższy termin w ciągu doby (bez całodniowych): minuty do początku i tytuł; null = brak albo brak zgody. */
+    fun next(ctx: Context): Pair<Int, String>? {
+        if (!granted(ctx)) return null
+        val now = System.currentTimeMillis()
+        val uri = CalendarContract.Instances.CONTENT_URI.buildUpon().also {
+            ContentUris.appendId(it, now)
+            ContentUris.appendId(it, now + 86_400_000L)
+        }.build()
+        val proj = arrayOf(CalendarContract.Instances.TITLE, CalendarContract.Instances.BEGIN, CalendarContract.Instances.ALL_DAY)
+        ctx.contentResolver.query(uri, proj, "${CalendarContract.Instances.VISIBLE}=1", null, "${CalendarContract.Instances.BEGIN} ASC")?.use { c ->
+            while (c.moveToNext()) {
+                val begin = c.getLong(1)
+                if (c.getInt(2) != 0 || begin <= now) continue
+                return ((begin - now) / 60_000L).toInt() to c.getString(0).orEmpty().ifBlank { "(bez tytułu)" }
+            }
+        }
+        return null
+    }
+
     fun list(ctx: Context, fromDate: String, days: Int): String {
         val start = parseDay(fromDate) ?: return "Zła data „$fromDate” – podaj RRRR-MM-DD"
         val end = start + days.coerceIn(1, 31) * 86_400_000L

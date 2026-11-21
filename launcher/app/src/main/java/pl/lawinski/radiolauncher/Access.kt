@@ -15,6 +15,7 @@ import androidx.compose.material.icons.outlined.Navigation
 import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material.icons.outlined.Radio
+import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -32,6 +33,7 @@ object Access {
 
     val groups = listOf(
         Group("car", "Auto", "Paliwo, drzwi, prędkość, położenie GPS, trasa", Icons.Outlined.DirectionsCar, setOf("car_status")),
+        Group("engine", "Silnik (OBD)", "Dane silnika i kody usterek z modułu OBD", Icons.Outlined.Speed, setOf("engine_data")),
         Group("nav", "Nawigacja", "Włączanie trasy w Mapach Google", Icons.Outlined.Navigation, setOf("navigate", "open_saved_place")),
         Group("places", "Miejsca i trasy (Google)", "Szukanie miejsc w pobliżu, oceny, czas dojazdu z korkami", Icons.Outlined.Place, setOf("places")),
         Group("apps", "Aplikacje", "Uruchamianie aplikacji w radiu", Icons.Outlined.Apps, setOf("open_app")),

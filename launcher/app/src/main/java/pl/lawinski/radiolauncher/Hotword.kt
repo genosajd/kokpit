@@ -136,6 +136,21 @@ object Hotword {
     }
 
     /** Okienko asystenta zajmuje mikrofon – wstrzymaj / wznów. */
+    /**
+     * Trwa rozmowa telefoniczna (dzwoni, łączy albo rozmowa): nasłuch oddaje mikrofon. Układ dźwiękowy radia
+     * przydziela sygnał odniesienia usuwania echa nagrywaniu, które wystartuje pierwsze – nasłuch nie może go
+     * zabrać rozmowie (i nie ma po co słuchać w jej trakcie).
+     */
+    @Volatile
+    var inCall = false
+        private set
+
+    fun callChanged(active: Boolean) {
+        if (inCall == active) return
+        inCall = active
+        if (active) HotwordService.instance?.stopForCall()
+    }
+
     fun pause() = HotwordService.instance?.pauseListening()
     fun resume() = HotwordService.instance?.resumeListening()
 
@@ -274,7 +289,7 @@ class HotwordService : Service() {
 
     private fun startListening() {
         val m = model ?: return
-        if (listener != null || muted || paused || stopped) return
+        if (listener != null || muted || paused || stopped || Hotword.inCall) return
         val old = worker
         listener = Thread({ runCatching { old?.join(1500) }; listen(m) }, "KokpitHotword").also { worker = it; it.start() }
     }
@@ -394,6 +409,12 @@ class HotwordService : Service() {
         Speech.stop(); VoiceActivity.start(this)
         // gdyby okienko się nie otworzyło (brak zgody na wyświetlanie nad innymi) – słuchaj dalej
         main.postDelayed({ if (!VoiceActivity.open) resumeListening() }, 4000)
+    }
+
+    fun stopForCall() {
+        Hotword.status.value = "rozmowa telefoniczna – przerwa"
+        Log.i(TAG, "rozmowa – oddaję mikrofon")
+        stopListening()
     }
 
     fun pauseListening() {

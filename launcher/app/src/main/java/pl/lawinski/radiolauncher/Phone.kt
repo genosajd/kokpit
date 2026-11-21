@@ -146,6 +146,7 @@ object Phone {
         val now = System.currentTimeMillis()
         when (state) {
             OUTGOING, INCOMING, ACTIVE -> {
+                Hotword.callChanged(true) // od razu: mikrofon musi być wolny, zanim radio uruchomi tor rozmowy
                 val number = rawNumber.ifBlank { prev.number }
                 val name = find(number)?.first?.name ?: rawName.ifBlank { prev.name }
                 val fresh = !prev.active
@@ -164,6 +165,7 @@ object Phone {
                 }
             }
             else -> {
+                Hotword.callChanged(false)
                 if (prev.active) {
                     val type = if (!prev.inbound) "out" else if (prev.answered) "in" else "missed"
                     val seconds = if (prev.answered) ((now - prev.since) / 1000).coerceAtLeast(0) else 0

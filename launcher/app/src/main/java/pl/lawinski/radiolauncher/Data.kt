@@ -141,6 +141,16 @@ object Prefs {
         set(v) = sp.edit().putLong("yt_access_until", v).apply()
 
     /** reguły właściciela (Rules.kt), tablica JSON */
+    /** kody usterek, o których reguła „nowa usterka” już powiedziała (po przecinku) */
+    var rulesFaults: String
+        get() = sp.getString("rules_faults", "") ?: ""
+        set(v) = sp.edit().putString("rules_faults", v).apply()
+
+    /** czas ostatniego nieodebranego połączenia zgłoszonego przez regułę (ms) */
+    var rulesMissedAt: Long
+        get() = sp.getLong("rules_missed_at", 0L)
+        set(v) = sp.edit().putLong("rules_missed_at", v).apply()
+
     var rules: String
         get() = sp.getString("rules", "[]") ?: "[]"
         set(v) = sp.edit().putString("rules", v).apply()
@@ -351,6 +361,36 @@ object Prefs {
         get() = sp.getBoolean("ai_speak", true)
         set(v) = sp.edit().putBoolean("ai_speak", v).apply()
 
+    /** silnik auta do szacowania mocy chwilowej: "moc w KM/moment w Nm", pusty = nie pokazuj mocy */
+    var engineSpec: String
+        get() = sp.getString("engine_spec", "184/380") ?: "184/380"
+        set(v) = sp.edit().putString("engine_spec", v).apply()
+
+    /** Odczyt danych silnika z modułu OBD (Obd.kt). */
+    var obd: Boolean
+        get() = sp.getBoolean("obd", false)
+        set(v) = sp.edit().putBoolean("obd", v).apply()
+
+    /** fragment nazwy sparowanego modułu OBD; pusty = pierwszy o typowej nazwie (V-LINK, OBD, ELM…) */
+    var obdDevice: String
+        get() = sp.getString("obd_device", "") ?: ""
+        set(v) = sp.edit().putString("obd_device", v).apply()
+
+    /** adres symulatora OBD po TCP (host:port) – do prób bez auta; pusty = Bluetooth */
+    var obdTcp: String
+        get() = sp.getString("obd_tcp", "") ?: ""
+        set(v) = sp.edit().putString("obd_tcp", v).apply()
+
+    /** czy bieżące dane silnika i usterki są dopisywane do każdego pytania do asystenta */
+    var obdContext: Boolean
+        get() = sp.getBoolean("obd_context", true)
+        set(v) = sp.edit().putBoolean("obd_context", v).apply()
+
+    /** Usuwanie echa w rozmowie przez program kokpit-echo (tylko radio Witstek, patrz Echo.kt). */
+    var echo: Boolean
+        get() = sp.getBoolean("echo", false)
+        set(v) = sp.edit().putBoolean("echo", v).apply()
+
     /** Ostrzeżenie „Zapnij pasy” z CAN; domyślnie wyłączone, bo sygnał obejmuje też puste fotele. */
     var beltWarn: Boolean
         get() = sp.getBoolean("belt_warn", false)
@@ -493,6 +533,19 @@ fun openCarScreen(ctx: Context): Boolean = try {
     true
 } catch (_: Exception) {
     false
+}
+
+/**
+ * Ekran Bluetooth radia Witstek (parowanie telefonu, lista urządzeń). Ekran startowy aplikacji telefonu Witstek
+ * (StartActivity) bywa wyłączony, żeby nie wyskakiwał przy rozmowach – dlatego otwieramy wprost jej ekran główny.
+ */
+fun openRadioBluetooth(ctx: Context): Boolean = listOf("com.wits.bt.id8.bmw.activity.ID8BMWMainActivity", "com.wits.bt.StartActivity").any { cls ->
+    try {
+        ctx.startActivity(Intent(Intent.ACTION_MAIN).setClassName("com.wits.bt", cls).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        true
+    } catch (_: Exception) {
+        false
+    }
 }
 
 /**

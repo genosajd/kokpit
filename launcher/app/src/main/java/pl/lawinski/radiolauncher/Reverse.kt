@@ -112,8 +112,17 @@ object Reverse {
     fun frame(ctx: Context, b: ByteArray, fresh: Boolean) {
         if (!fresh || b.size < 12 || b[0].toInt() != 0x0c || b[1].toInt() != 0x61) return
         test = false
-        set(ctx, b[2].toInt() == 1, (4..11).map { (b[it].toInt() and 0xFF).let { v -> if (v > 7) NONE else v } })
+        val sensors = (4..11).map { (b[it].toInt() and 0xFF).let { v -> if (v > 7) NONE else v } }
+        // Przycisk PDC („P”) nie ma własnego sygnału (sprawdzone 2026-11-21): przy wyłączonym PDC wszystkie czujniki
+        // zgłaszają „brak przeszkody”, po włączeniu podają odległości. Widok otwieramy więc także, gdy którykolwiek
+        // czujnik coś widzi, a zamykamy dopiero po 1,5 s samych „brak” (pojedyncze czujniki migają).
+        val now = System.currentTimeMillis()
+        if (sensors.any { it < NONE }) seenAt = now
+        set(ctx, b[2].toInt() == 1 || now - seenAt < PDC_HOLD_MS, sensors)
     }
+
+    private const val PDC_HOLD_MS = 1500L
+    private var seenAt = 0L
 
     fun set(ctx: Context, active: Boolean, sensors: List<Int>) {
         lastAt = System.currentTimeMillis()

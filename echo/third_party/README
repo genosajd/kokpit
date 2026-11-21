@@ -1,0 +1,5 @@
+Źródła zewnętrzne (poza repozytorium):
+  git clone --depth 1 -b v2.1 https://gitlab.freedesktop.org/pulseaudio/webrtc-audio-processing.git wap
+  cd wap && meson setup ../build-wap --cross-file ../android-arm64.ini --default-library=static \
+     --buildtype=release -Dgnustl=disabled --prefix=$PWD/../inst   (meson sam pobiera abseil-cpp)
+  ninja -C ../build-wap install

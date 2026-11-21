@@ -78,6 +78,16 @@ object XiaomiCamServer {
     fun url(name: String) = RTSP + Uri.encode(name) + "?video"
 }
 
+/**
+ * Kamery, których opis strumienia RTSP odtwarzacz odrzuca (go2rtc dla źródeł innych niż Xiaomi, np. kamer internetowych,
+ * podaje w nim dwa razy ten sam parametr H.264 – „Multiple entries with same key”). Takie gramy z tego samego serwera
+ * jako strumień MP4 po HTTP.
+ */
+private object HttpStream {
+    val cameras = mutableSetOf<String>()
+    fun url(name: String) = "http://127.0.0.1:11984/api/stream.mp4?src=" + Uri.encode(name) + "&video"
+}
+
 /** Kamery, które grają tylko na dekoderze programowym (strumień większy niż 1920x1088). */
 private object SoftwareDecode {
     val cameras = mutableSetOf<String>()
@@ -122,6 +132,15 @@ fun LiveCameraView(name: String, modifier: Modifier = Modifier, onProblem: (Stri
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                // wadliwy opis strumienia RTSP – ta kamera pójdzie jako MP4 po HTTP
+                val badSdp = generateSequence<Throwable>(error) { it.cause }.any { it.message?.contains("Multiple entries with same key") == true }
+                if (badSdp && name !in HttpStream.cameras) {
+                    android.util.Log.i("KokpitCam", "„$name”: opis RTSP odrzucony, przełączam na strumień MP4")
+                    HttpStream.cameras += name
+                    onState(false)
+                    attempt++
+                    return
+                }
                 // dekoder radia (SM6125) przyjmuje najwyżej 1920x1088; strumień 2.5K go przerasta
                 val tooBig = error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
                     error.errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES ||
@@ -144,7 +163,10 @@ fun LiveCameraView(name: String, modifier: Modifier = Modifier, onProblem: (Stri
             }
         }
         player.addListener(listener)
-        val src = RtspMediaSource.Factory().setForceUseRtpTcp(true).setTimeoutMs(8000)
+        val src = if (name in HttpStream.cameras) {
+            androidx.media3.exoplayer.source.ProgressiveMediaSource.Factory(androidx.media3.datasource.DefaultHttpDataSource.Factory())
+                .createMediaSource(MediaItem.fromUri(HttpStream.url(name)))
+        } else RtspMediaSource.Factory().setForceUseRtpTcp(true).setTimeoutMs(8000)
             .createMediaSource(MediaItem.fromUri(XiaomiCamServer.url(name)))
         player.setMediaSource(src)
         player.playWhenReady = true

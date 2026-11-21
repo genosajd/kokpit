@@ -5,6 +5,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -566,6 +567,22 @@ fun CallWindow(ctx: Context, call: Phone.Call, onMinimize: (() -> Unit)? = null)
             Text("GŁOŚNOŚĆ", color = Dim, fontSize = s(16), fontWeight = FontWeight.Bold, letterSpacing = s(2.5))
             Spacer(Modifier.height(d(12)))
             CallVolume(ctx)
+            if (Echo.available) {
+                Spacer(Modifier.height(d(22)))
+                val echoOn by Echo.enabled
+                val echoNote by Echo.note
+                LaunchedEffect(call.since) { while (true) { Echo.refresh(); kotlinx.coroutines.delay(2500) } }
+                Row(
+                    Modifier.fillMaxWidth().pane().clickable { Echo.setEnabled(ctx, !echoOn) }.padding(horizontal = d(20), vertical = d(14)),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Usuwanie echa", color = Txt, fontSize = s(26), fontWeight = FontWeight.Medium)
+                        Text(if (echoOn) echoNote.ifBlank { "włączone" } else "wyłączone", color = Dim, fontSize = s(18), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Text(if (echoOn) "WŁ." else "WYŁ.", color = if (echoOn) GreenTxt else Dim, fontSize = s(22), fontWeight = FontWeight.Bold)
+                }
+            }
             Spacer(Modifier.height(d(22)))
             Text(if (call.name.isBlank()) "WCZEŚNIEJ Z TYM NUMEREM" else ("WCZEŚNIEJ: " + name.substringBefore(' ')).uppercase(), color = Dim, fontSize = s(16), fontWeight = FontWeight.Bold, letterSpacing = s(2.5), maxLines = 1)
             Spacer(Modifier.height(d(12)))

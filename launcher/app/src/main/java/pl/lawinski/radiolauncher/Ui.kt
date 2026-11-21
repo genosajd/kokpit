@@ -45,6 +45,8 @@ import androidx.compose.material.icons.outlined.DirectionsCar
 import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.People
+import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.Timeline
 import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.WaterDrop
@@ -320,6 +322,8 @@ fun LauncherScreen(act: MainActivity) {
                                 BlockId.WIDGET -> WidgetBlock(m, act, slot.n, onChoose = { dialog = Dlg.Widgets(slot.n) })
                                 BlockId.PHONE -> PhoneBlock(m, slot, act, onSearch = { dialog = Dlg.Phone(true) }, onOpen = { dialog = Dlg.Phone() })
                                 BlockId.FAMILY -> FamilyBlock(m, slot, act, onSettings = { Prefs.settingsGroup = 7; dialog = Dlg.Settings })
+                                BlockId.ENGINE -> EngineBlock(m, slot, act, onSettings = { Prefs.settingsGroup = OBD_SETTINGS_GROUP; dialog = Dlg.Settings })
+                                BlockId.TRIP -> TripBlock(m, slot, act, onSettings = { Prefs.settingsGroup = OBD_SETTINGS_GROUP; dialog = Dlg.Settings })
                             }
                         }
                     }
@@ -625,6 +629,8 @@ private fun blockInfo(id: BlockId) = when (id) {
     BlockId.MEDIA -> BlockInfo(Icons.Outlined.MusicNote, "Tytuł · wykonawca", "Steruje tym, co gra: YouTube, SoundCloud i inne")
     BlockId.PHONE -> BlockInfo(Icons.Outlined.Phone, "Klawiatura · kontakty", "Dzwonienie przez Bluetooth radia")
     BlockId.FAMILY -> BlockInfo(Icons.Outlined.People, "Kto · gdzie · kiedy", "Położenia bliskich i urządzeń z serwera lokalizacji (MCP)")
+    BlockId.ENGINE -> BlockInfo(Icons.Outlined.Speed, "Obroty · temperatura", "Dane silnika z modułu OBD: obroty, płyn, doładowanie, usterki")
+    BlockId.TRIP -> BlockInfo(Icons.Outlined.Timeline, "Dystans · czas · średnia", "Podsumowanie bieżącej jazdy z modułu OBD")
 }
 
 /** Okno „Widżety” w edycji układu: siatka klocków z podglądem i nazwą; dotknięcie dodaje klocek do ekranu. */

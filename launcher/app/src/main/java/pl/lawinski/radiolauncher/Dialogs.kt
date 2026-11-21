@@ -36,6 +36,7 @@ import androidx.compose.material.icons.outlined.Hearing
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.DataUsage
+import androidx.compose.material.icons.outlined.NoiseAware
 import androidx.compose.material.icons.outlined.Thermostat
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Palette
@@ -58,6 +59,8 @@ import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.Bluetooth
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.ViewWeek
 import androidx.compose.material.icons.outlined.AcUnit
@@ -284,7 +287,7 @@ fun SettingsDialog(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("Kokpit F11 0.3.38", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
+                Text("Kokpit F11 0.3.39", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
             }
             Spacer(Modifier.width(d(26)))
             LazyVerticalGrid(
@@ -336,6 +339,7 @@ fun SettingsDialog(
                 if (!c.isDefault) item { SettingTile(Icons.Outlined.RestartAlt, "Przywróć wygląd", "Usuwa zmiany dla „${themeState.value.name}”") { ThemeCustoms.set(themeState.value.id, ThemeCustom()) } }
                     }
                     1 -> {
+                if (Radio.witstek) item { SettingTile(Icons.Outlined.Bluetooth, "Bluetooth radia", "Parowanie telefonu, lista urządzeń") { openRadioBluetooth(act) } }
                 if (Radio.witstek) item { SettingTile(Icons.Outlined.Tune, "Ustawienia radia Witstek", "Dźwięk, system, nawigacja; fabryczne z PIN-em 8888") { openRadioSettings(act) } }
                 item {
                     SettingTile(Icons.Outlined.Memory, "Rodzaj radia", Radio.describe()) {
@@ -429,6 +433,49 @@ fun SettingsDialog(
                 if (act.cameraWidgetId.intValue != -1) item { SettingTile(Icons.Outlined.Delete, "Usuń widżet kamery", "Blok kamery wróci do wyboru") { act.removeCameraWidget() } }
                     }
                     6 -> {
+                item {
+                    var on by remember { mutableStateOf(Prefs.obd) }
+                    val st by Obd.state
+                    SettingTile(
+                        Icons.Outlined.Speed, "Dane silnika (OBD)",
+                        when {
+                            !on -> "Obroty, temperatury, doładowanie i usterki z modułu OBD (Bluetooth)"
+                            st.connected -> "Połączono z modułem – klocki „Silnik” i „Jazda” w oknie Widżety"
+                            else -> st.note.ifEmpty { "Łączę z modułem OBD…" }
+                        },
+                        on = on,
+                    ) {
+                        on = !on; Prefs.obd = on
+                        // zgoda na Bluetooth (Android 12+) pytana przy włączaniu
+                        Thread {
+                            if (on && android.os.Build.VERSION.SDK_INT >= 31 && Prefs.obdTcp.isBlank()) act.requestPermissionsBlocking(arrayOf(android.Manifest.permission.BLUETOOTH_CONNECT))
+                            Obd.sync(act)
+                        }.start()
+                    }
+                }
+                if (Prefs.obd) item {
+                    // moc chwilowa jest szacowana z krzywej momentu wybranego silnika; dotknięcie wybiera następny
+                    var spec by remember { mutableStateOf(Prefs.engineSpec) }
+                    val i = Obd.ENGINES.indexOfFirst { "${it.second}/${it.third}" == spec }
+                    SettingTile(
+                        Icons.Outlined.Speed, "Silnik do wskaźnika mocy",
+                        if (spec.isEmpty()) "Moc chwilowa nie jest pokazywana – dotknij, żeby wybrać silnik"
+                        else (Obd.ENGINES.getOrNull(i)?.let { "${it.first}: ${it.second} KM, ${it.third} Nm" } ?: spec) + " – dotknij, żeby zmienić; moc to szacunek",
+                        on = spec.isNotEmpty(),
+                    ) {
+                        spec = if (i == Obd.ENGINES.size - 1) "" else Obd.ENGINES[i + 1].let { "${it.second}/${it.third}" }
+                        Prefs.engineSpec = spec
+                    }
+                }
+                if (Prefs.obd) item {
+                    var on by remember { mutableStateOf(Prefs.obdContext) }
+                    SettingTile(
+                        Icons.Outlined.SmartToy, "Dane silnika dla asystenta",
+                        if (on) "Przy każdym pytaniu asystent dostaje bieżące dane i usterki – sam wspomni, gdy coś jest nie tak"
+                        else "Asystent sprawdza dane silnika tylko wtedy, gdy o nie zapytasz",
+                        on = on,
+                    ) { on = !on; Prefs.obdContext = on }
+                }
                 if (Radio.witstek) {
                     item {
                         SettingTile(Icons.Outlined.Warning, "Ostrzeżenie „Zapnij pasy”", if (beltOn.value) "Gdy kierowca jedzie bez zapiętego pasa" else "Ostrzega zestaw wskaźników BMW", on = beltOn.value) {
@@ -464,6 +511,17 @@ fun SettingsDialog(
                         }
                     }
                     item {
+                        var on by remember { mutableStateOf(Prefs.echo) }
+                        SettingTile(
+                            Icons.Outlined.NoiseAware, "Usuwanie echa w rozmowie",
+                            if (on) "Włączone – rozmówca nie słyszy siebie (program z prawami systemu)"
+                            else "Rozmowa jak zwykle (rozmówca może słyszeć echo swojego głosu)",
+                            on = on,
+                        ) {
+                            on = !on; Echo.setEnabled(act, on)
+                        }
+                    }
+                    item {
                         var on by remember { mutableStateOf(Prefs.canLogs) }
                         SettingTile(Icons.Outlined.DataUsage, "Dane auta z dzienników radia",
                             if (on) "Paliwo, bieg, temperatura, telefon → iDrive. Android pyta o zgodę po starcie Kokpitu"
@@ -483,7 +541,7 @@ fun SettingsDialog(
                     val r = Rules.list[i]
                     SettingTile(Icons.Outlined.Bolt, r.summary(), if (r.complete()) r.text.replace('\n', ' ').take(90) else "Niepełna – dotknij, aby uzupełnić", on = r.on) { editRule = r to false }
                 }
-                item { SettingTile(Icons.Outlined.Add, "Dodaj regułę", "Np. paliwo mniej niż 10 l, wiadomość na Slacku albo otwarta furtka na kamerze") { editRule = Rule(id = System.currentTimeMillis()) to true } }
+                item { SettingTile(Icons.Outlined.Add, "Dodaj regułę", "Np. paliwo mniej niż 10 l, nowa usterka silnika, nieodebrane połączenie, termin za 15 minut, otwarta furtka na kamerze") { editRule = Rule(id = System.currentTimeMillis()) to true } }
                     }
                     8 -> {
                 item {
@@ -1121,6 +1179,7 @@ fun VoicePickerDialog(act: MainActivity, onClose: () -> Unit) {
 fun NotesDialog(onClose: () -> Unit) {
     val items = Notes.items
     var confirm by remember { mutableStateOf(false) }
+    val act = MainActivity.live
     Sheet("Notes asystenta", onClose) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(d(14))) {
             Text(
@@ -1132,6 +1191,20 @@ fun NotesDialog(onClose: () -> Unit) {
                 if (confirm) { Notes.clear(); confirm = false } else confirm = true
             }).padding(horizontal = d(20)), contentAlignment = Alignment.Center) {
                 Text(if (confirm) "Na pewno usunąć wszystko?" else "Wyczyść notes", color = if (confirm) Accent else Txt, fontSize = s(20))
+            }
+        }
+        // plik w pamięci radia: jedna notatka w wierszu – można go przejrzeć, poprawić w edytorze i wczytać z powrotem
+        Row(Modifier.padding(top = d(12)), horizontalArrangement = Arrangement.spacedBy(d(14))) {
+            if (items.isNotEmpty()) Box(Modifier.height(d(64)).kokpitSurface(d(16)).combinedClickable(onClick = { act?.saveTextFile("kokpit-notes.txt", Notes.exportText()) }).padding(horizontal = d(20)), contentAlignment = Alignment.Center) {
+                Text("Zapisz do pliku", color = Txt, fontSize = s(20))
+            }
+            Box(Modifier.height(d(64)).kokpitSurface(d(16)).combinedClickable(onClick = {
+                act?.openTextFile { text ->
+                    val n = Notes.importText(text)
+                    android.widget.Toast.makeText(act, if (n < 0) "Plik jest pusty – notes bez zmian" else "Wczytano notatek: $n (zastąpiły poprzednie)", android.widget.Toast.LENGTH_LONG).show()
+                }
+            }).padding(horizontal = d(20)), contentAlignment = Alignment.Center) {
+                Text("Wczytaj z pliku", color = Txt, fontSize = s(20))
             }
         }
         Spacer(Modifier.height(d(16)))

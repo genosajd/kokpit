@@ -48,6 +48,7 @@ private fun Chip(text: String, on: Boolean = false, color: Color? = null, onClic
 @Composable
 fun RuleDialog(rule: Rule, isNew: Boolean, act: MainActivity, onClose: () -> Unit) {
     var r by remember { mutableStateOf(rule) }
+    var group by remember { mutableStateOf(rule.source.group) }
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(
             Modifier.fillMaxWidth(0.8f).clip(RoundedCornerShape(d(28))).background(LocalTheme.current.block)
@@ -60,10 +61,24 @@ fun RuleDialog(rule: Rule, isNew: Boolean, act: MainActivity, onClose: () -> Uni
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(d(10)),
                 verticalAlignment = Alignment.CenterVertically) {
                 Text("Jeśli", color = Dim, fontSize = s(22))
-                RuleSource.entries.filter { Radio.witstek || it == r.source || (it != RuleSource.FUEL && it != RuleSource.BATTERY) }.forEach { src ->
+                val usable = RuleSource.entries.filter { Radio.witstek || it == r.source || !it.witstekOnly }
+                RuleSource.GROUPS.filter { g -> usable.any { it.group == g } }.forEach { g ->
+                    Chip(g, on = group == g) {
+                        group = g
+                        // jedyne źródło w grupie wybiera się od razu
+                        usable.filter { it.group == g }.singleOrNull()?.let { src -> if (src != r.source) r = r.copy(source = src, value = "", slackTs = "", ai = r.ai || src.camera) }
+                    }
+                }
+            }
+            // 1b. źródła z wybranej grupy
+            val inGroup = RuleSource.entries.filter { it.group == group && (Radio.witstek || it == r.source || !it.witstekOnly) }
+            if (inGroup.size > 1) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(d(10)),
+                verticalAlignment = Alignment.CenterVertically) {
+                inGroup.forEach { src ->
                     Chip(src.title, on = r.source == src) {
-                        // przy zmianie rodzaju źródła (liczba ↔ Slack) stara wartość nie pasuje
-                        r = r.copy(source = src, value = if (src.slack != r.source.slack || src.camera != r.source.camera) "" else r.value, ai = r.ai || src.camera, slackTs = "")
+                        // przy zmianie rodzaju źródła (liczba ↔ tekst ↔ zdarzenie) stara wartość nie pasuje
+                        val sameKind = src.slack == r.source.slack && src.camera == r.source.camera && src.event == r.source.event && src.unit == r.source.unit
+                        r = r.copy(source = src, value = if (sameKind) r.value else "", ai = r.ai || src.camera, slackTs = "")
                     }
                 }
             }
@@ -84,16 +99,23 @@ fun RuleDialog(rule: Rule, isNew: Boolean, act: MainActivity, onClose: () -> Uni
                         placeholder = { Text("8:00") }, isError = r.minuteOfDay() == null,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     )
+                } else if (r.source.event) {
+                    Text(r.source.hint, color = Dim, fontSize = s(20))
                 } else if (!r.source.slack) {
-                    Chip("mniej niż", on = r.less) { r = r.copy(less = true) }
-                    Chip("więcej niż", on = !r.less) { r = r.copy(less = false) }
+                    if (r.source.who.isNotEmpty()) OutlinedTextField(
+                        r.who, { r = r.copy(who = it) }, singleLine = true, modifier = Modifier.width(d(480)),
+                        placeholder = { Text(r.source.who) },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    )
+                    Chip(if (r.source.who.isNotEmpty()) "bliżej niż" else "mniej niż", on = r.less) { r = r.copy(less = true) }
+                    Chip(if (r.source.who.isNotEmpty()) "dalej niż" else "więcej niż", on = !r.less) { r = r.copy(less = false) }
                     OutlinedTextField(
                         r.value, { r = r.copy(value = it) }, singleLine = true, modifier = Modifier.width(d(260)),
                         placeholder = { Text("liczba") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
                     )
                     Text(r.source.unit, color = Txt, fontSize = s(22))
-                    val now = Rules.current(r.source, act)
+                    val now = Rules.current(r, act)
                     Text(if (now != null) "teraz: ${Rules.format(now)} ${r.source.unit}" else "teraz: brak danych", color = Dim, fontSize = s(20),
                         modifier = Modifier.padding(start = d(16)))
                 } else if (r.source.target.isNotEmpty()) {
@@ -113,6 +135,11 @@ fun RuleDialog(rule: Rule, isNew: Boolean, act: MainActivity, onClose: () -> Uni
                 r.text, { r = r.copy(text = it) }, minLines = 2, maxLines = 4, modifier = Modifier.fillMaxWidth(),
                 placeholder = {
                     Text(if (r.source.camera) "Co sprawdzić na zdjęciu i kiedy się odezwać, np.: Jeśli furtka jest otwarta, powiedz mi o tym"
+                    else if (r.source == RuleSource.ENGINE_FAULT) "Co ma zrobić asystent, np.: Powiedz, co to za usterka i czy mogę jechać dalej"
+                    else if (r.source == RuleSource.PHONE_MISSED) "Co ma zrobić asystent, np.: Powiedz, kto dzwonił, i zapytaj, czy oddzwonić"
+                    else if (r.source == RuleSource.FAMILY_DIST) "Co ma zrobić asystent, np.: Powiedz, że Wojtek jest już blisko"
+                    else if (r.source == RuleSource.CAL_NEXT) "Co ma zrobić asystent, np.: Przypomnij o terminie i powiedz, ile zajmie dojazd"
+                    else if (r.source == RuleSource.TRIP_TIME) "Co ma zrobić asystent, np.: Zaproponuj przerwę i znajdź stację z kawą po drodze"
                     else if (r.ai) "Co ma zrobić asystent, np.: Powiedz, że trzeba zatankować, i zaproponuj najbliższą stację"
                     else "Tekst do przeczytania, np.: Zostało {wartość} litrów paliwa, jedź na stację")
                 },
@@ -137,7 +164,7 @@ fun RuleDialog(rule: Rule, isNew: Boolean, act: MainActivity, onClose: () -> Uni
                 if (!r.complete()) Text("Uzupełnij warunek i tekst", color = Dim, fontSize = s(20))
                 Chip("Anuluj") { onClose() }
                 Chip("Zapisz", on = true) {
-                    if (r.complete()) { Rules.put(r.copy(value = r.value.trim(), text = r.text.trim())); onClose() }
+                    if (r.complete()) { Rules.put(r.copy(value = r.value.trim(), who = r.who.trim(), text = r.text.trim())); onClose() }
                 }
             }
         }

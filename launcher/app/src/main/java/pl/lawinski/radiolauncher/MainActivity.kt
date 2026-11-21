@@ -266,6 +266,12 @@ class MainActivity : ComponentActivity() {
                 }.start()
             }
             intent.getStringExtra("cam")?.let { CamProbe.grab(this@MainActivity, it) }
+            // klatki z kamer dekoderem programowym (jak w radiu przy nagraniach 2,5K): --es softframe 1 / 0
+            intent.getStringExtra("softframe")?.let { SoftFrame.force = it == "1"; android.util.Log.i("KokpitTest", "softframe: ${SoftFrame.force}") }
+            // symulator OBD: --es obdtcp 10.0.2.2:35000 (włącza odczyt), --es obdtcp "" = z powrotem Bluetooth; --es obdstate 1 = stan do logu
+            intent.getStringExtra("obdtcp")?.let { v -> Prefs.obdTcp = v.trim(); if (v.isNotBlank()) Prefs.obd = true; Obd.sync(applicationContext); android.util.Log.i("KokpitTest", "obd: adres „${v.trim()}”, odczyt ${if (Prefs.obd) "włączony" else "wyłączony"}") }
+            intent.getStringExtra("obdstate")?.let { (Obd.contextLine() + Obd.report()).lines().forEach { l -> android.util.Log.i("KokpitTest", "obd: $l") } }
+            intent.getStringExtra("obd")?.let { ObdProbe.run(applicationContext, it, intent.getStringExtra("obdname") ?: "V-LINK") }
             // serwer MCP bez przepisywania klucza na ekranie: --es mcp '{"name":"…","url":"https://…/mcp","token":"…"}'
             intent.getStringExtra("mcp")?.let { v ->
                 Thread {
@@ -306,6 +312,8 @@ class MainActivity : ComponentActivity() {
         Prefs.init(this)
         Notes.init()
         Pics.init(this)
+        Echo.init(this)
+        Obd.sync(this)
         // listy narzędzi serwerów MCP odświeżane w tle (asystent ma od razu zapamiętane)
         Thread { runCatching { if (Mcp.servers().isNotEmpty()) Mcp.refresh() } }.start()
         Assistant.init(this)
@@ -361,6 +369,7 @@ class MainActivity : ComponentActivity() {
         location.start()
         visible.value = true
         Hotword.sync(this)
+        Echo.sync(this)
     }
 
     override fun onResume() {
