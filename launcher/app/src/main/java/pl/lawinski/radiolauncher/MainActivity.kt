@@ -452,7 +452,7 @@ class MainActivity : ComponentActivity() {
 
     /** Zapisuje bieżący układ (z liczbą stron) do późniejszego przywrócenia. */
     fun storeLayout() {
-        Prefs.layoutSaved = "${GridPages.count.intValue}|" + LayoutStore.encode(layout.value)
+        Prefs.layoutSaved = "${GridPages.count.intValue},${GridLevels.count.intValue}|" + LayoutStore.encode(layout.value)
         hasSavedLayout.value = true
     }
 
@@ -468,9 +468,14 @@ class MainActivity : ComponentActivity() {
     fun restoreLayout(): Boolean {
         val saved = Prefs.layoutSaved
         if (saved.isBlank()) return false
-        val pages = saved.substringBefore('|').toIntOrNull()?.coerceIn(1, 3) ?: return false
+        // "strony|układ" (starszy zapis) albo "strony,piętra|układ"
+        val head = saved.substringBefore('|').split(',')
+        val pages = head[0].toIntOrNull()?.coerceIn(1, 3) ?: return false
+        val levels = head.getOrNull(1)?.toIntOrNull()?.coerceIn(1, 3) ?: 1
         GridPages.count.intValue = pages
         Prefs.gridPages = pages
+        GridLevels.count.intValue = levels
+        Prefs.gridLevels = levels
         saveLayout(LayoutStore.decode(saved.substringAfter('|')))
         return true
     }

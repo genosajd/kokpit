@@ -287,7 +287,7 @@ fun SettingsDialog(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("Kokpit F11 0.3.39", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
+                Text("Kokpit F11 0.3.40", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
             }
             Spacer(Modifier.width(d(26)))
             LazyVerticalGrid(
@@ -361,6 +361,16 @@ fun SettingsDialog(
                         GridPages.count.intValue = next
                         Prefs.gridPages = next
                         // bloki z usuniętych stron znikają (można je dodać ponownie w edycji)
+                        act.saveLayout(act.layout.value.filter { it.inBounds })
+                    }
+                }
+                item {
+                    val n = GridLevels.count.intValue
+                    SettingTile(Icons.Outlined.ViewWeek, "Piętra ekranu: $n", if (n == 1) "Dotknij, aby dodać piętro poniżej (przewijanie w dół)" else "Przewijanie w dół; dotknij, aby zmienić (1–3)") {
+                        val next = if (n >= 3) 1 else n + 1
+                        GridLevels.count.intValue = next
+                        Prefs.gridLevels = next
+                        // bloki z usuniętych pięter znikają (można je dodać ponownie w edycji)
                         act.saveLayout(act.layout.value.filter { it.inBounds })
                     }
                 }

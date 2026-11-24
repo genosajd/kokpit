@@ -269,7 +269,7 @@ fun LauncherScreen(act: MainActivity) {
             val cols = GridGeom.colsFor(maxWidth.value, maxHeight.value)
             androidx.compose.runtime.SideEffect { if (GridGeom.cols.intValue != cols) GridGeom.cols.intValue = cols }
             LaunchedEffect(cols) { if (Prefs.layout.isNullOrBlank()) act.layout.value = LayoutStore.defaultFor(cols) }
-            val u = minOf(maxWidth / (320f * cols), maxHeight / (360f * GRID_ROWS))
+            val u = minOf(maxWidth / (320f * cols), maxHeight / (360f * GridGeom.rows.intValue))
             if (animate) Aurora()
             if (gloss) GlintDriver()
             CompositionLocalProvider(LocalU provides u) {
@@ -279,7 +279,7 @@ fun LauncherScreen(act: MainActivity) {
                             onAdd = { id ->
                                 val next = LayoutStore.place(slots, id)
                                 if (next != null) act.saveLayout(next)
-                                else android.widget.Toast.makeText(act, "Brak miejsca – zmniejsz albo schowaj klocek, albo dodaj stronę ekranu (Ustawienia → Ekran)", android.widget.Toast.LENGTH_LONG).show()
+                                else android.widget.Toast.makeText(act, "Brak miejsca – zmniejsz albo schowaj klocek, albo dodaj stronę lub piętro ekranu (Ustawienia → Ekran)", android.widget.Toast.LENGTH_LONG).show()
                             },
                             onReset = { act.saveLayout(LayoutStore.defaultFor(GridGeom.cols.intValue)) },
                             onStore = {

@@ -234,6 +234,10 @@ object Prefs {
     var gridPages: Int
         get() = sp.getInt("grid_pages", 1)
         set(v) = sp.edit().putInt("grid_pages", v).apply()
+    /** Piętra ekranu: ile wysokości ekranu ma siatka (przewijanie w dół). */
+    var gridLevels: Int
+        get() = sp.getInt("grid_levels", 1)
+        set(v) = sp.edit().putInt("grid_levels", v).apply()
 
     /** Tryb jasny (false = ciemny) */
     var lightMode: Boolean

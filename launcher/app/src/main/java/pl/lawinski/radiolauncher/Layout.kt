@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
@@ -82,8 +84,14 @@ object GridPages {
     val count by lazy { androidx.compose.runtime.mutableIntStateOf(Prefs.gridPages.coerceIn(1, 3)) }
 }
 
+/** Liczba pięter ekranu (każde to pełna wysokość ekranu, przewijanie w dół), Ustawienia → Ekran. */
+object GridLevels {
+    val count by lazy { androidx.compose.runtime.mutableIntStateOf(Prefs.gridLevels.coerceIn(1, 3)) }
+}
+
 val GRID_COLS: Int get() = 8 * GridPages.count.intValue
-val GRID_ROWS: Int get() = GridGeom.rows.intValue
+/** Wszystkie wiersze siatki: widoczne naraz ([GridGeom.rows]) × piętra. */
+val GRID_ROWS: Int get() = GridGeom.rows.intValue * GridLevels.count.intValue
 
 /**
  * Ile kolumn siatki mieści się naraz na ekranie. Radio 2560×720 ma 8; węższe ekrany mają mniej
@@ -125,7 +133,7 @@ object LayoutStore {
     /** Układ startowy dla tego ekranu; przy trzech wierszach klocki z górnego wiersza rosną o jeden, dolne schodzą na sam dół. */
     fun defaultFor(cols: Int): List<Slot> {
         val base = if (cols <= 5) NARROW else DEFAULT
-        return if (GRID_ROWS < 3) base else base.map { if (it.r == 0) it.copy(h = it.h + 1) else it.copy(r = it.r + 1) }
+        return if (GridGeom.rows.intValue < 3) base else base.map { if (it.r == 0) it.copy(h = it.h + 1) else it.copy(r = it.r + 1) }
     }
 
     val DEFAULT = listOf(
@@ -300,6 +308,7 @@ fun BlockGrid(
         }
         // nowy klocek (np. dodany w edycji na innej stronie) – przewiń, żeby był widoczny
         val known = remember { mutableStateOf(slots.map { it.key }.toSet()) }
+        val knownV = remember { mutableStateOf(slots.map { it.key }.toSet()) }
         androidx.compose.runtime.LaunchedEffect(slots) {
             val added = slots.filter { it.key !in known.value }
             known.value = slots.map { it.key }.toSet()
@@ -315,7 +324,28 @@ fun BlockGrid(
             if (!scrolling) GridScroll.px.floatValue = 0f
             else androidx.compose.runtime.snapshotFlow { scroll.value }.collect { GridScroll.px.floatValue = it.toFloat() }
         }
-        val cellH = (maxHeight - gap * (GRID_ROWS - 1)) / GRID_ROWS
+        // piętra ekranu: na wysokość wchodzi [GridGeom.rows] wierszy, reszta przewija się w dół
+        val shownRows = GridGeom.rows.intValue.coerceAtMost(GRID_ROWS)
+        val vScrolling = GRID_ROWS > shownRows
+        val vScroll = androidx.compose.foundation.rememberScrollState()
+        val pageH = maxHeight
+        val cellH = (pageH - gap * (shownRows - 1)) / shownRows
+        val innerH = if (vScrolling) cellH * GRID_ROWS + gap * (GRID_ROWS - 1) else maxHeight
+        val rowStep = with(density) { (cellH + gap).toPx() }
+        androidx.compose.runtime.LaunchedEffect(vScroll.isScrollInProgress, vScrolling, edit) {
+            if (vScrolling && !edit && !vScroll.isScrollInProgress) {
+                val target = (kotlin.math.round(vScroll.value / rowStep) * rowStep).toInt().coerceIn(0, vScroll.maxValue)
+                if (target != vScroll.value) vScroll.animateScrollTo(target)
+            }
+        }
+        androidx.compose.runtime.LaunchedEffect(slots) {
+            val s = slots.firstOrNull { it.key !in knownV.value }
+            knownV.value = slots.map { it.key }.toSet()
+            if (s == null || !vScrolling) return@LaunchedEffect
+            val y = (s.r * rowStep).toInt()
+            if (y < vScroll.value || y + s.h * rowStep > vScroll.value + with(density) { pageH.toPx() })
+                vScroll.animateScrollTo((kotlin.math.floor(s.r.toFloat() / shownRows) * shownRows * rowStep).toInt().coerceIn(0, vScroll.maxValue))
+        }
         // Przechył pokrętła iDrive (strzałki): zaznaczenie skacze do sąsiedniego klocka; obrót (Tab) chodzi po przyciskach.
         val requesters = remember { HashMap<String, androidx.compose.ui.focus.FocusRequester>() }
         var focusedKey by remember { mutableStateOf<String?>(null) }
@@ -341,11 +371,13 @@ fun BlockGrid(
             }
             true
         }
-        Box(Modifier.fillMaxSize().then(jump).then(if (scrolling) Modifier.horizontalScroll(scroll) else Modifier)) {
-        Box(Modifier.width(innerW).fillMaxHeight()) {
+        Box(Modifier.fillMaxSize().then(jump).then(if (scrolling) Modifier.horizontalScroll(scroll) else Modifier)
+            .then(if (vScrolling) Modifier.verticalScroll(vScroll) else Modifier)) {
+        Box(Modifier.width(innerW).then(if (vScrolling) Modifier.height(innerH) else Modifier.fillMaxHeight())) {
         val stepX = with(density) { (cellW + gap).toPx() }
         val viewW = with(density) { pageW.toPx() }
         val stepY = with(density) { (cellH + gap).toPx() }
+        val viewH = with(density) { pageH.toPx() }
 
         if (edit) {
             for (r in 0 until GRID_ROWS) for (c in 0 until GRID_COLS) {
@@ -440,6 +472,20 @@ fun BlockGrid(
                                                 drag += Offset(moved, 0f)
                                             }
                                         }
+                                        if (vScrolling) {
+                                            val s0 = cur.first { it.same(slot) }
+                                            val fingerY = s0.r * stepY + start.y + drag.y - vScroll.value
+                                            val edge = viewH * 0.1f
+                                            val push = when {
+                                                fingerY > viewH - edge -> 16f
+                                                fingerY < edge -> -16f
+                                                else -> 0f
+                                            }
+                                            if (push != 0f) {
+                                                val moved = vScroll.dispatchRawDelta(push)
+                                                drag += Offset(0f, moved)
+                                            }
+                                        }
                                         preview = target()
                                     }
                                 },
@@ -490,6 +536,15 @@ fun BlockGrid(
             }
         }
         }
+        }
+        if (vScrolling) {
+            // pasek przewijania z prawej: które piętro jest widoczne
+            val trackH = d(160)
+            val thumbH = trackH * shownRows / GRID_ROWS
+            val frac = if (vScroll.maxValue > 0) vScroll.value.toFloat() / vScroll.maxValue else 0f
+            Box(Modifier.align(Alignment.CenterEnd).offset(x = gap * 0.9f).size(d(8), trackH).clip(RoundedCornerShape(d(4))).background(Dim.copy(alpha = 0.3f))) {
+                Box(Modifier.offset(y = (trackH - thumbH) * frac).size(d(8), thumbH).clip(RoundedCornerShape(d(4))).background(Txt.copy(alpha = 0.8f)))
+            }
         }
         if (scrolling) {
             // pasek przewijania na dole: jaka część całej siatki jest widoczna i gdzie
