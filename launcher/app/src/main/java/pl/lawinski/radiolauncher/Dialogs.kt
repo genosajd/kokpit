@@ -287,7 +287,7 @@ fun SettingsDialog(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("Kokpit F11 0.3.40", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
+                Text("Kokpit F11 0.3.41", color = Dim, fontSize = s(18), modifier = Modifier.padding(start = d(22), top = d(10)))
             }
             Spacer(Modifier.width(d(26)))
             LazyVerticalGrid(
@@ -485,6 +485,12 @@ fun SettingsDialog(
                         else "Asystent sprawdza dane silnika tylko wtedy, gdy o nie zapytasz",
                         on = on,
                     ) { on = !on; Prefs.obdContext = on }
+                }
+                item {
+                    SettingTile(
+                        Icons.Outlined.Speed, "Prędkościomierz: " + if (speedDial.value) "tarczowy" else "cyfrowy",
+                        "Jak blok auta pokazuje prędkość – dotknij, aby zmienić", on = speedDial.value,
+                    ) { speedDial.value = !speedDial.value; Prefs.speedDial = speedDial.value }
                 }
                 if (Radio.witstek) {
                     item {

@@ -385,6 +385,11 @@ object Prefs {
         get() = sp.getString("obd_tcp", "") ?: ""
         set(v) = sp.edit().putString("obd_tcp", v).apply()
 
+    /** prędkościomierz w bloku auta: false = cyfrowy, true = tarczowy */
+    var speedDial: Boolean
+        get() = sp.getBoolean("speed_dial", false)
+        set(v) = sp.edit().putBoolean("speed_dial", v).apply()
+
     /** czy bieżące dane silnika i usterki są dopisywane do każdego pytania do asystenta */
     var obdContext: Boolean
         get() = sp.getBoolean("obd_context", true)

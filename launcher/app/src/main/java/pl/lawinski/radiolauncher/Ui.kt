@@ -974,14 +974,21 @@ fun CarBlock(modifier: Modifier, act: MainActivity, apps: List<AppEntry>, edit: 
         val carTop = d(70)
         // wygląd z ukośnym światłem (iDrive 8): poświata „oddycha” pod kołami zamiast na dole bloku
         val floorPulse = if (theme.planes != null && LocalAnimate.current) loop(4000) else null
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().background(theme.carBack)) {
+        // z danymi silnika (OBD) auto zajmuje szerokość jednej kolumny, resztę bloku dostaje silnik
+        val split = Obd.state.value.connected && maxWidth >= d(560)
+        val zone = if (split) maxWidth * 0.6f else maxWidth
+        val dial = speedDial.value
+        // w wąskiej części auto jest powiększone: ramka zdjęcia ma po bokach sporo pustego miejsca
+        val boost = if (split) 1.45f else 1f
         Box(
-            Modifier.fillMaxSize().background(theme.carBack).drawBehind {
+            Modifier.fillMaxHeight().width(zone).drawBehind {
                 // pas światła za autem, niebieska poświata na „podłodze” i cień pod kołami – jak w projekcie wyglądu
                 val c = theme.planes?.first ?: return@drawBehind
                 val w = size.width; val hgt = size.height
                 // gdzie stoi zdjęcie auta (ramka 1200×500 wpisana w blok, patrz Image niżej): koła są przy dolnej krawędzi ramki
                 val top = carTop.toPx()
-                val k = minOf(w * 0.95f / 1200f, (hgt - top) / 500f)
+                val k = minOf(w * 0.95f / 1200f, (hgt - top) / 500f) * boost
                 val fw = 1200f * k; val fh = 500f * k
                 val cx = w / 2f
                 val floor = (hgt + top) / 2f + fh * 0.44f
@@ -1025,7 +1032,7 @@ fun CarBlock(modifier: Modifier, act: MainActivity, apps: List<AppEntry>, edit: 
                     ) else Image(
                         painterResource(R.drawable.car_f11), "Auto",
                         contentScale = ContentScale.Fit,
-                        modifier = Modifier.align(Alignment.Center).fillMaxWidth(0.95f).padding(top = d(70)),
+                        modifier = Modifier.align(Alignment.Center).fillMaxWidth(0.95f).padding(top = d(70)).graphicsLayer { scaleX = boost; scaleY = boost },
                     )
                 }
             }
@@ -1037,16 +1044,17 @@ fun CarBlock(modifier: Modifier, act: MainActivity, apps: List<AppEntry>, edit: 
                 Spark(0.74f, 0.56f, d(28), 2.1f)
             }
 
-            Row(Modifier.padding(start = d(34), top = d(30)), verticalAlignment = Alignment.Bottom) {
+            Row(if (dial) Modifier.align(Alignment.TopCenter).padding(top = d(22)) else Modifier.padding(start = d(34), top = d(30)), verticalAlignment = Alignment.Bottom) {
+                if (dial) SpeedDial(speed, Modifier.size(d(196)))
                 // wygląd animowany: prędkość dochodzi płynnie do nowej wartości
                 val shown by androidx.compose.animation.core.animateIntAsState(speed ?: 0, label = "speed")
-                Text(
+                if (!dial) Text(
                     if (speed == null) "—" else (if (LocalAnimate.current) shown else speed).toString(), color = Txt, fontSize = s(96), fontWeight = FontWeight.Light,
                     fontFamily = theme.numbers,
                     style = theme.speed?.let { androidx.compose.ui.text.TextStyle(brush = it) } ?: androidx.compose.ui.text.TextStyle.Default,
                 )
-                Spacer(Modifier.width(d(10)))
-                Text("km/h", color = Dim, fontSize = s(24), modifier = Modifier.padding(bottom = d(16)))
+                if (!dial) Spacer(Modifier.width(d(10)))
+                if (!dial) Text("km/h", color = Dim, fontSize = s(24), modifier = Modifier.padding(bottom = d(16)))
                 car.gear?.let { g ->
                     Spacer(Modifier.width(d(26)))
                     Text(
@@ -1057,10 +1065,11 @@ fun CarBlock(modifier: Modifier, act: MainActivity, apps: List<AppEntry>, edit: 
                     )
                 }
             }
+            if (!split && !dial) CarEngine()
             // tylko w czasie jazdy i gdy włączone w Ustawieniach
             if (car.beltWarn && beltOn.value && (speed ?: 0) >= 10) {
                 Row(
-                    Modifier.padding(start = d(34), top = d(150)).clip(RoundedCornerShape(d(14))).background(Color(0x33FF5252))
+                    Modifier.padding(start = d(34), top = d(if (dial) 280 else if (split) 236 else if (Obd.state.value.connected) 212 else 150)).clip(RoundedCornerShape(d(14))).background(Color(0x33FF5252))
                         .padding(horizontal = d(16), vertical = d(8)),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -1071,7 +1080,12 @@ fun CarBlock(modifier: Modifier, act: MainActivity, apps: List<AppEntry>, edit: 
             }
 
             car.fuelL?.let { fuel ->
-                Column(Modifier.align(Alignment.TopEnd).padding(top = d(34), end = d(34)).fillMaxWidth(0.36f).widthIn(max = d(330)), horizontalAlignment = Alignment.End) {
+                Column(
+                    if (split && dial) Modifier.align(Alignment.TopCenter).padding(top = d(214)).width(d(170))
+                    else if (split) Modifier.align(Alignment.TopEnd).padding(top = d(34), end = d(26)).width(d(150))
+                    else Modifier.align(Alignment.TopEnd).padding(top = d(34), end = d(34)).fillMaxWidth(0.36f).widthIn(max = d(330)),
+                    horizontalAlignment = if (split && dial) Alignment.CenterHorizontally else Alignment.End,
+                ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Outlined.LocalGasStation, null, tint = Dim, modifier = Modifier.size(d(30)))
                         Spacer(Modifier.width(d(8)))
@@ -1096,7 +1110,7 @@ fun CarBlock(modifier: Modifier, act: MainActivity, apps: List<AppEntry>, edit: 
                 }
             }
 
-            Row(Modifier.align(Alignment.BottomEnd).padding(d(26)), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.align(if (split) Alignment.BottomCenter else Alignment.BottomEnd).padding(d(if (split) 20 else 26)), verticalAlignment = Alignment.CenterVertically) {
                 if (Radio.witstek) {
                     Box(
                         Modifier.kokpitSurface(d(18))
@@ -1121,6 +1135,11 @@ fun CarBlock(modifier: Modifier, act: MainActivity, apps: List<AppEntry>, edit: 
                     SmallAppIcon(right)
                 }
             }
+        }
+        if (split) {
+            Box(Modifier.align(Alignment.CenterStart).padding(start = zone).padding(vertical = d(28)).fillMaxHeight().width(1.dp).background(Line))
+            CarEnginePanel(Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(maxWidth - zone))
+        }
         }
     }
 }
@@ -1766,6 +1785,9 @@ fun ChatDialog(act: MainActivity, onSettings: () -> Unit, onClose: () -> Unit) {
 
 /** Przełącznik ostrzeżenia o pasach (Ustawienia); stan Compose, żeby blok auta reagował od razu. */
 val beltOn by lazy { mutableStateOf(Prefs.beltWarn) }
+
+/** Prędkościomierz tarczowy zamiast cyfrowego (Ustawienia → Auto). */
+val speedDial by lazy { mutableStateOf(Prefs.speedDial) }
 
 object WeatherState {
     val current = kotlinx.coroutines.flow.MutableStateFlow<Weather?>(null)
