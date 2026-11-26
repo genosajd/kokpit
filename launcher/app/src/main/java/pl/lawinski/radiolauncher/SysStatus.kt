@@ -50,6 +50,9 @@ data class SysStatus(
     val batteryPct: Int? = null,
     val batteryVolt: Float? = null,
     val charging: Boolean = false,
+    val cpuPct: Int? = null,         // obciążenie procesora od poprzedniego odczytu
+    val cpuOwn: Boolean = false,     // true = tylko Kokpit (system nie udostępnia całości)
+    val ramPct: Int? = null,         // zajęta pamięć
 )
 
 object SysStatusReader {
@@ -109,8 +112,49 @@ object SysStatusReader {
             charging = st == BatteryManager.BATTERY_STATUS_CHARGING || st == BatteryManager.BATTERY_STATUS_FULL
         }
         // radio Witstek: bateria Androida jest udawana, a napięcie akumulatora auta podaje MCU (143 = 14,3 V)
-        carBatteryVolt()?.let { return SysStatus(wifi, cell, type, online, null, it, false) }
-        return SysStatus(wifi, cell, type, online, pct, volt, charging)
+        val ram = runCatching {
+            val mi = android.app.ActivityManager.MemoryInfo()
+            ctx.getSystemService(android.app.ActivityManager::class.java).getMemoryInfo(mi)
+            if (mi.totalMem > 0) ((mi.totalMem - mi.availMem) * 100 / mi.totalMem).toInt() else null
+        }.getOrNull()
+        val cpu = CpuLoad.read()
+        carBatteryVolt()?.let { return SysStatus(wifi, cell, type, online, null, it, false, cpu?.first, cpu?.second ?: false, ram) }
+        return SysStatus(wifi, cell, type, online, pct, volt, charging, cpu?.first, cpu?.second ?: false, ram)
+    }
+}
+
+/**
+ * Obciążenie procesora między kolejnymi odczytami. Cały system z /proc/stat (radio Witstek na to pozwala);
+ * gdzie Android tego zabrania, sam proces Kokpitu jako część wszystkich rdzeni.
+ */
+object CpuLoad {
+    private var busy = 0L
+    private var total = 0L
+    private var ownCpu = 0L
+    private var ownWall = 0L
+
+    /** procent i znacznik „tylko Kokpit”; null przy pierwszym odczycie */
+    @Synchronized
+    fun read(): Pair<Int, Boolean>? {
+        val line = runCatching { java.io.File("/proc/stat").useLines { it.firstOrNull() } }.getOrNull()
+        val f = line?.takeIf { it.startsWith("cpu ") }?.trim()?.split(Regex("\\s+"))?.drop(1)?.mapNotNull { it.toLongOrNull() }
+        if (f != null && f.size >= 4) {
+            val all = f.take(8).sum()
+            val idle = f[3] + (f.getOrNull(4) ?: 0L)
+            val dAll = all - total
+            val dBusy = (all - idle) - busy
+            val had = total > 0
+            total = all; busy = all - idle
+            return if (had && dAll > 0) (dBusy * 100 / dAll).toInt().coerceIn(0, 100) to false else null
+        }
+        val cpu = android.os.Process.getElapsedCpuTime()
+        val wall = android.os.SystemClock.elapsedRealtime()
+        val dCpu = cpu - ownCpu
+        val dWall = wall - ownWall
+        val had = ownWall > 0
+        ownCpu = cpu; ownWall = wall
+        val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+        return if (had && dWall > 0) (dCpu * 100 / (dWall * cores)).toInt().coerceIn(0, 100) to true else null
     }
 }
 
@@ -134,6 +178,18 @@ fun SystemIcons() {
     }
     val phoneOn by Phone.connected
     Row(verticalAlignment = Alignment.CenterVertically) {
+        st.cpuPct?.let { v ->
+            StatIcon(Icons.Rounded.DeveloperBoard, Dim)
+            Spacer(Modifier.width(d(4)))
+            Text("$v%", color = if (v >= 90) Warn else Txt, fontSize = s(22))
+            Spacer(Modifier.width(d(16)))
+        }
+        st.ramPct?.let { v ->
+            StatIcon(Icons.Rounded.Memory, Dim)
+            Spacer(Modifier.width(d(4)))
+            Text("$v%", color = if (v >= 90) Warn else Txt, fontSize = s(22))
+            Spacer(Modifier.width(d(20)))
+        }
         // telefon połączony z Bluetoothem radia (dzwonienie przez radio)
         if (phoneOn) {
             StatIcon(Icons.Rounded.Bluetooth)
